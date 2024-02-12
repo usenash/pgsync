@@ -115,6 +115,7 @@ class Sync(Base, metaclass=Singleton):
         self.table_list: list = [
             f"table public.{table}" for table in self.tree.tables
         ]
+        logger.info(f"Table list: {self.table_list}")
 
     def validate(self, repl_slots: bool = True) -> None:
         """Perform all validation right away."""
@@ -1230,7 +1231,7 @@ class Sync(Base, metaclass=Singleton):
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
-        logger.debug(f"pull txmin: {txmin} - txmax: {txmax}")
+        logger.info(f"pull txmin: {txmin} - txmax: {txmax}")
         # Wait for transactions in flight to complete
 
         slow_txns = self._wait_for_in_flight_transactions(txmin, txmax)
@@ -1313,6 +1314,7 @@ class Sync(Base, metaclass=Singleton):
     ) -> None | list[int]:
         """Wait for in flight transactions to complete."""
         # could do fancier logic than this, but for now let's hardcode to 2, 4, and 8 seconds
+        in_flight_transactions = None
         for wait in settings.TXN_IN_FLIGHT_WAITS:
             in_flight_transactions = self.get_in_flight_transactions(
                 txmin=txmin, txmax=txmax, txn_ids=txn_ids
@@ -1340,6 +1342,9 @@ class Sync(Base, metaclass=Singleton):
 
         if txmin is None and txmax is None and not txn_ids:
             return []
+
+        if txmin is None:
+            txmin = 0
 
         if txn_ids:
             query = f"""
