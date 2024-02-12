@@ -1231,7 +1231,7 @@ class Sync(Base, metaclass=Singleton):
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
-        logger.info(f"pull txmin: {txmin} - txmax: {txmax}")
+        logger.debug(f"pull txmin: {txmin} - txmax: {txmax}")
         # Wait for transactions in flight to complete
 
         slow_txns = self._wait_for_in_flight_transactions(txmin, txmax)
