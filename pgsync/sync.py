@@ -1343,9 +1343,6 @@ class Sync(Base, metaclass=Singleton):
         if txmin is None and txmax is None and not txn_ids:
             return []
 
-        if txmin is None:
-            txmin = 0
-
         if txn_ids:
             query = f"""
                 SELECT backend_xid::text::bigint
