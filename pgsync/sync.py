@@ -51,15 +51,15 @@ from .singleton import Singleton
 from .transform import Transform
 from .urls import get_redis_url
 from .utils import (
+    MutuallyExclusiveOption,
+    Timer,
     chunks,
     compiled_query,
     config_loader,
     exception,
     get_config,
-    MutuallyExclusiveOption,
     show_settings,
     threaded,
-    Timer,
 )
 
 logger = logging.getLogger(__name__)
@@ -1352,7 +1352,7 @@ class Sync(Base, metaclass=Singleton):
                 FROM pg_stat_activity
                 WHERE state in ('active', 'idle in transaction')
                 AND ((backend_xid::text::bigint) >= {txmin} AND  (backend_xid::text::bigint) < {txmax}
-                OR (backend_xid::text::bigint) in ({','.join([str(txn) for txn in txn_ids])})
+                OR (backend_xid::text::bigint) in ({','.join([str(txn) for txn in txn_ids])}))
                 AND usename <> 'pgsync_user';
             """
         else:
