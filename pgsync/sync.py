@@ -1577,7 +1577,7 @@ def main(
             while True:
                 docs = list(config_loader(config))
                 if len(docs) == 1:
-                    sync: Sync = Sync(document, verbose=verbose, **kwargs)
+                    sync: Sync = Sync(docs[0], verbose=verbose, **kwargs)
                     sync.pull_loop()  # execution will block here
                 else:
                     for document in config_loader(config):
