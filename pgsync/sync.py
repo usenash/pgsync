@@ -427,12 +427,6 @@ class Sync(Base, metaclass=Singleton):
             all_payloads = [self.parse_logical_slot(row.data) for row in rows]
             payloads: List[Payload] = []
             for i, payload in enumerate(all_payloads):
-                if payload.tg_op == "UPDATE":
-                    # don't need to process if the old and new are the same
-                    old_payload = {k: v for k, v in payload.old.items() if k in self.table2cols[payload.table]}
-                    new_payload = {k: v for k, v in payload.new.items() if k in self.table2cols[payload.table]}
-                    if old_payload == new_payload:
-                        continue
                 payloads.append(payload)
                 j: int = i + 1
                 if j < len(rows):
@@ -1216,6 +1210,12 @@ class Sync(Base, metaclass=Singleton):
         if txids != set([None]):
             self.checkpoint: int = min(min(txids), self.txid_current) - 1
 
+    def pull_loop(self) -> None:
+        """Pull loop."""
+        while True:
+            self.pull()
+            time.sleep(settings.POLL_INTERVAL)
+
     def pull(self) -> None:
         """Pull data from db."""
         # start_time = time.time()
@@ -1575,10 +1575,15 @@ def main(
 
         elif polling:
             while True:
-                for document in config_loader(config):
+                docs = list(config_loader(config))
+                if len(docs) == 1:
                     sync: Sync = Sync(document, verbose=verbose, **kwargs)
-                    sync.pull()
-                time.sleep(settings.POLL_INTERVAL)
+                    sync.pull_loop()  # execution will block here
+                else:
+                    for document in config_loader(config):
+                        sync: Sync = Sync(document, verbose=verbose, **kwargs)
+                        sync.pull()
+                    time.sleep(settings.POLL_INTERVAL)
 
         else:
             for document in config_loader(config):
