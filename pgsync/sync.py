@@ -51,15 +51,15 @@ from .singleton import Singleton
 from .transform import Transform
 from .urls import get_redis_url
 from .utils import (
-    MutuallyExclusiveOption,
-    Timer,
     chunks,
     compiled_query,
     config_loader,
     exception,
     get_config,
+    MutuallyExclusiveOption,
     show_settings,
     threaded,
+    Timer,
 )
 
 logger = logging.getLogger(__name__)
@@ -1228,6 +1228,7 @@ class Sync(Base, metaclass=Singleton):
 
     def pull(self) -> None:
         """Pull data from db."""
+        start_time = time.time()
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
@@ -1237,11 +1238,15 @@ class Sync(Base, metaclass=Singleton):
         slow_txns = self._wait_for_in_flight_transactions(txmin, txmax)
         all_slow_txns = self._add_slow_txns(slow_txns)
 
+        # sync the changes
+        logger.info(f'Starting sync to OpenSearch: {time.time() - start_time}')
         self.search_client.bulk(
             self.index, self.sync(txmin=txmin, txmax=txmax)
         )
         # now sync up to txmax to capture everything we may have missed
+        logger.info(f'completed sync to OpenSearch: {time.time() - start_time}, Starting logical slot changes')
         self.logical_slot_changes(txmin=txmin, txmax=txmax, upto_nchanges=None)
+        logger.info(f'completed logical slot changes: {time.time() - start_time}')
 
         # see if the slow ones finished yet
         if all_slow_txns:
@@ -1261,7 +1266,7 @@ class Sync(Base, metaclass=Singleton):
                     txn_ids=finished_txns, upto_nchanges=None
                 )
                 self._remove_slow_txns(finished_txns)
-
+        logger.info(f'Done - updating checkpoint: {time.time() - start_time}')
         self.checkpoint: int = txmax or self.txid_current
         self._truncate = True
 
