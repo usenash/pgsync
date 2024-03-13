@@ -10,7 +10,7 @@ import select
 import sys
 import time
 from collections import defaultdict
-from typing import AnyStr, Generator, List, Optional, Set
+from typing import Any, AnyStr, Generator, List, Optional, Set
 
 import click
 import orjson
@@ -115,6 +115,9 @@ class Sync(Base, metaclass=Singleton):
         self.table_list: list = [
             f"table public.{table}" for table in self.tree.tables
         ]
+        self.table2cols: dict[str, list[str]] = {
+            f"{node.table}": node.column_names for node in list(self.tree.root.traverse_breadth_first())
+        }
         logger.info(f"Table list: {self.table_list}")
 
     def validate(self, repl_slots: bool = True) -> None:
@@ -421,32 +424,19 @@ class Sync(Base, metaclass=Singleton):
                     continue
                 rows.append(row)
 
+            all_payloads = [self.parse_logical_slot(row.data) for row in rows]
             payloads: List[Payload] = []
-            for i, row in enumerate(rows):
-                logger.debug(f"txid: {row.xid}")
-                logger.debug(f"data: {row.data}")
-                # TODO: optimize this so we are not parsing the same row twice
-                try:
-                    payload: Payload = self.parse_logical_slot(row.data)
-                except Exception as e:
-                    logger.exception(
-                        f"Error parsing row: {e}\nRow data: {row.data}"
-                    )
-                    raise
+            for i, payload in enumerate(all_payloads):
+                if payload.tg_op == "UPDATE":
+                    # don't need to process if the old and new are the same
+                    old_payload = {k: v for k, v in payload.old.items() if k in self.table2cols[payload.table]}
+                    new_payload = {k: v for k, v in payload.new.items() if k in self.table2cols[payload.table]}
+                    if old_payload == new_payload:
+                        continue
                 payloads.append(payload)
-
                 j: int = i + 1
                 if j < len(rows):
-                    try:
-                        payload2: Payload = self.parse_logical_slot(
-                            rows[j].data
-                        )
-                    except Exception as e:
-                        logger.exception(
-                            f"Error parsing row: {e}\nRow data: {rows[j].data}"
-                        )
-                        raise
-
+                    payload2 = all_payloads[j]
                     if (
                         payload.tg_op != payload2.tg_op
                         or payload.table != payload2.table
@@ -454,12 +444,12 @@ class Sync(Base, metaclass=Singleton):
                         self.search_client.bulk(
                             self.index, self._payloads(payloads)
                         )
-                        payloads: list = []
+                        payloads = []
                 elif j == len(rows):
                     self.search_client.bulk(
                         self.index, self._payloads(payloads)
                     )
-                    payloads: list = []
+                    payloads = []
             self.logical_slot_get_changes(
                 self.__name,
                 txmin=txmin,
@@ -797,7 +787,7 @@ class Sync(Base, metaclass=Singleton):
 
         return filters
 
-    def _payloads(self, payloads: List[Payload]) -> None:
+    def _payloads(self, payloads: List[Payload]) -> Generator[Any, Any, None]:
         """
         The "payloads" is a list of payload operations to process together.
 
@@ -856,7 +846,7 @@ class Sync(Base, metaclass=Singleton):
                     )
                     raise
 
-        logger.debug(f"tg_op: {payload.tg_op} table: {node.name}")
+        # logger.debug(f"tg_op: {payload.tg_op} table: {node.name}")
 
         filters: dict = {
             node.table: [],
@@ -999,7 +989,7 @@ class Sync(Base, metaclass=Singleton):
             row[META] = Transform.get_primary_keys(keys)
 
             if self.verbose:
-                print(f"{(i+1)})")
+                print(f"{(i + 1)})")
                 print(f"pkeys: {primary_keys}")
                 pprint.pprint(row)
                 print("-" * 10)
@@ -1228,25 +1218,25 @@ class Sync(Base, metaclass=Singleton):
 
     def pull(self) -> None:
         """Pull data from db."""
-        start_time = time.time()
+        # start_time = time.time()
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
-        logger.debug(f"pull txmin: {txmin} - txmax: {txmax}")
+        # logger.debug(f"pull txmin: {txmin} - txmax: {txmax}")
         # Wait for transactions in flight to complete
 
         slow_txns = self._wait_for_in_flight_transactions(txmin, txmax)
         all_slow_txns = self._add_slow_txns(slow_txns)
 
         # sync the changes
-        logger.info(f'Starting sync to OpenSearch: {time.time() - start_time}')
+        # logger.debug(f'Starting sync to OpenSearch: {time.time() - start_time}')
         self.search_client.bulk(
             self.index, self.sync(txmin=txmin, txmax=txmax)
         )
         # now sync up to txmax to capture everything we may have missed
-        logger.info(f'completed sync to OpenSearch: {time.time() - start_time}, Starting logical slot changes')
+        # logger.debug(f'completed sync to OpenSearch: {time.time() - start_time}, Starting logical slot changes')
         self.logical_slot_changes(txmin=txmin, txmax=txmax, upto_nchanges=None)
-        logger.info(f'completed logical slot changes: {time.time() - start_time}')
+        # logger.debug(f'completed logical slot changes: {time.time() - start_time}')
 
         # see if the slow ones finished yet
         if all_slow_txns:
@@ -1266,7 +1256,7 @@ class Sync(Base, metaclass=Singleton):
                     txn_ids=finished_txns, upto_nchanges=None
                 )
                 self._remove_slow_txns(finished_txns)
-        logger.info(f'Done - updating checkpoint: {time.time() - start_time}')
+        # logger.debug(f'Done - updating checkpoint: {time.time() - start_time}')
         self.checkpoint: int = txmax or self.txid_current
         self._truncate = True
 
