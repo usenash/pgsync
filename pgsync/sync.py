@@ -369,16 +369,35 @@ class Sync(Base, metaclass=Singleton):
 
             all_payloads = [self.parse_logical_slot(row.data) for row in rows]
             payloads: List[Payload] = []
+            ids_already_seen = set()
+            bulk_ops = []
             for i, payload in enumerate(all_payloads):
+                if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
+                    # we don't need to update the same record twice
+                    continue
                 payloads.append(payload)
+
                 if i + 1 < len(all_payloads):
                     payload2 = all_payloads[i + 1]
                     if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
-                        self.search_client.bulk(self.index, self._payloads(payloads))
+                        bulk_ops.extend(list(self._payloads(payloads)))
+                        ids_already_seen.update(extract_ids(orjson.dumps(bulk_ops[-1]).decode()))
                         payloads = []
                 else:
-                    self.search_client.bulk(self.index, self._payloads(payloads))
+                    bulk_ops.extend(list(self._payloads(payloads)))
+                    self._bulk_index_and_remove_duplicates(bulk_ops)
+                    bulk_ops = []
                     payloads = []
+
+                if len(bulk_ops) > 1000:
+                    # remove duplicates
+                    self._bulk_index_and_remove_duplicates(bulk_ops)
+                    bulk_ops = []
+
+            if bulk_ops:
+                self._bulk_index_and_remove_duplicates(bulk_ops)
+                bulk_ops = []
+
             self.logical_slot_get_changes(
                 self.__name,
                 txmin=txmin,
@@ -391,6 +410,17 @@ class Sync(Base, metaclass=Singleton):
             offset += limit
             total += len(changes)
             self.count["xlog"] += len(rows)
+
+    def _bulk_index_and_remove_duplicates(self, bulk_ops: list) -> None:
+        to_index = []
+        job_ids_already_seen = set()
+        for op in reversed(bulk_ops):
+            doc_id = op["_id"]
+            if doc_id not in job_ids_already_seen:
+                to_index.append(op)
+                job_ids_already_seen.add(doc_id)
+
+        self.search_client.bulk(self.index, list(reversed(to_index)))
 
     def _root_primary_key_resolver(self, node: Node, payload: Payload, filters: list) -> list:
         fields: dict = defaultdict(list)
@@ -1407,6 +1437,12 @@ def main(
                 sync.pull()
                 if daemon:
                     sync.receive(nthreads_polldb)
+
+
+def extract_ids(json_string: str) -> set[str]:
+    pattern = r'"((?:job|loc|tsk|dlv|qot|cfg|pkg|flg|bth)_[^"]+)"'
+    ids = re.findall(pattern, json_string)
+    return set(ids) - {"job_metadata", "job_configurations", "job_metadata_tags"}
 
 
 if __name__ == "__main__":
