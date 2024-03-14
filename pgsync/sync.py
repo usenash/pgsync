@@ -374,6 +374,13 @@ class Sync(Base, metaclass=Singleton):
             for i, payload in enumerate(all_payloads):
                 if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
                     # we don't need to update the same record twice
+                    if payloads and i + 1 < len(all_payloads):
+                        payload2 = all_payloads[i + 1]
+                        if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
+                            bulk_ops.extend(list(self._payloads(payloads)))
+                            ids_already_seen.update(extract_ids(orjson.dumps(bulk_ops[-1]).decode()))
+                            payloads = []
+
                     continue
                 payloads.append(payload)
 
