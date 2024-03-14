@@ -377,8 +377,9 @@ class Sync(Base, metaclass=Singleton):
                     if payloads and i + 1 < len(all_payloads):
                         payload2 = all_payloads[i + 1]
                         if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
-                            bulk_ops.extend(list(self._payloads(payloads)))
-                            ids_already_seen.update(extract_ids(orjson.dumps(bulk_ops[-1]).decode()))
+                            ops_to_add = list(self._payloads(payloads))
+                            bulk_ops.extend(ops_to_add)
+                            ids_already_seen.update(extract_ids(ops_to_add))
                             payloads = []
 
                     continue
@@ -387,8 +388,9 @@ class Sync(Base, metaclass=Singleton):
                 if i + 1 < len(all_payloads):
                     payload2 = all_payloads[i + 1]
                     if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
-                        bulk_ops.extend(list(self._payloads(payloads)))
-                        ids_already_seen.update(extract_ids(orjson.dumps(bulk_ops[-1]).decode()))
+                        ops_to_add = list(self._payloads(payloads))
+                        bulk_ops.extend(ops_to_add)
+                        ids_already_seen.update(extract_ids(ops_to_add))
                         payloads = []
                 else:
                     bulk_ops.extend(list(self._payloads(payloads)))
@@ -1446,7 +1448,12 @@ def main(
                     sync.receive(nthreads_polldb)
 
 
-def extract_ids(json_string: str) -> set[str]:
+def extract_ids(ops_to_add: list[dict]) -> set[str]:
+    """Extract the ids from the ops_to_add."""
+    if not ops_to_add:
+        return set()
+
+    json_string = orjson.dumps(ops_to_add).decode()
     pattern = r'"((?:job|loc|tsk|dlv|qot|cfg|pkg|flg|bth)_[^"]+)"'
     ids = re.findall(pattern, json_string)
     return set(ids) - {"job_metadata", "job_configurations", "job_metadata_tags"}
