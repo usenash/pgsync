@@ -344,6 +344,7 @@ class Sync(Base, metaclass=Singleton):
             txn_ids=txn_ids,
             upto_nchanges=upto_nchanges,
         )
+        logger.info(f"Total changes to sync via logical slot: {count}")
         while True:
             changes: int = self.logical_slot_peek_changes(
                 self.__name,
@@ -419,6 +420,7 @@ class Sync(Base, metaclass=Singleton):
             offset += limit
             total += len(changes)
             self.count["xlog"] += len(rows)
+            logger.info(f"Done syncing {count} changes")
 
     def _bulk_index_and_remove_duplicates(self, bulk_ops: list) -> None:
         to_index = []
