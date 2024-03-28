@@ -1,4 +1,5 @@
 """PGSync SearchClient helper."""
+
 import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
@@ -44,14 +45,10 @@ class SearchClient(object):
                 node_class=elastic_transport.RequestsHttpNode,
             )
             try:
-                self.major_version: int = int(
-                    self.__client.info()["version"]["number"].split(".")[0]
-                )
+                self.major_version: int = int(self.__client.info()["version"]["number"].split(".")[0])
             except (IndexError, KeyError, ValueError):
                 pass
-            self.streaming_bulk: Callable = (
-                elasticsearch.helpers.streaming_bulk
-            )
+            self.streaming_bulk: Callable = elasticsearch.helpers.streaming_bulk
             self.parallel_bulk: Callable = elasticsearch.helpers.parallel_bulk
             self.Search: Callable = elasticsearch_dsl.Search
             self.Bool: Callable = elasticsearch_dsl.query.Bool
@@ -110,24 +107,16 @@ class SearchClient(object):
     ) -> None:
         """Pull sync data from generator to Elasticsearch/OpenSearch."""
         chunk_size = chunk_size or settings.ELASTICSEARCH_CHUNK_SIZE
-        max_chunk_bytes = (
-            max_chunk_bytes or settings.ELASTICSEARCH_MAX_CHUNK_BYTES
-        )
+        max_chunk_bytes = max_chunk_bytes or settings.ELASTICSEARCH_MAX_CHUNK_BYTES
         thread_count = thread_count or settings.ELASTICSEARCH_THREAD_COUNT
         queue_size = queue_size or settings.ELASTICSEARCH_QUEUE_SIZE
         # max_retries, initial_backoff & max_backoff are only applicable when
         # streaming bulk is in use
         max_retries = max_retries or settings.ELASTICSEARCH_MAX_RETRIES
-        initial_backoff = (
-            initial_backoff or settings.ELASTICSEARCH_INITIAL_BACKOFF
-        )
+        initial_backoff = initial_backoff or settings.ELASTICSEARCH_INITIAL_BACKOFF
         max_backoff = max_backoff or settings.ELASTICSEARCH_MAX_BACKOFF
-        raise_on_exception = (
-            raise_on_exception or settings.ELASTICSEARCH_RAISE_ON_EXCEPTION
-        )
-        raise_on_error = (
-            raise_on_error or settings.ELASTICSEARCH_RAISE_ON_ERROR
-        )
+        raise_on_exception = raise_on_exception or settings.ELASTICSEARCH_RAISE_ON_EXCEPTION
+        raise_on_error = raise_on_error or settings.ELASTICSEARCH_RAISE_ON_ERROR
         ignore_status = ignore_status or settings.ELASTICSEARCH_IGNORE_STATUS
 
         try:
@@ -279,18 +268,10 @@ class SearchClient(object):
             # check the response of the request
             logger.debug(f"create index response {response}")
             # check the result of the mapping on the index
-            logger.debug(
-                f"created mapping: "
-                f"{self.__client.indices.get_mapping(index=index)}"
-            )
-            logger.debug(
-                f"created setting: "
-                f"{self.__client.indices.get_settings(index=index)}"
-            )
+            logger.debug(f"created mapping: " f"{self.__client.indices.get_mapping(index=index)}")
+            logger.debug(f"created setting: " f"{self.__client.indices.get_settings(index=index)}")
 
-    def _build_mapping(
-        self, tree: Tree, routing: Optional[str] = None
-    ) -> Optional[dict]:
+    def _build_mapping(self, tree: Tree, routing: Optional[str] = None) -> Optional[dict]:
         """
         Get the Elasticsearch/OpenSearch mapping from the schema transform.
         """  # noqa D200
@@ -302,9 +283,7 @@ class SearchClient(object):
                 column: str = rename.get(key, key)
                 column_type: str = mapping[column]["type"]
                 if column_type not in ELASTICSEARCH_TYPES:
-                    raise RuntimeError(
-                        f"Invalid Elasticsearch type {column_type}"
-                    )
+                    raise RuntimeError(f"Invalid Elasticsearch type {column_type}")
 
                 if "properties" not in node._mapping:
                     node._mapping["properties"] = {}
@@ -315,14 +294,9 @@ class SearchClient(object):
                         continue
 
                     if parameter not in ELASTICSEARCH_MAPPING_PARAMETERS:
-                        raise RuntimeError(
-                            f"Invalid Elasticsearch mapping parameter "
-                            f"{parameter}"
-                        )
+                        raise RuntimeError(f"Invalid Elasticsearch mapping parameter " f"{parameter}")
 
-                    node._mapping["properties"][column][
-                        parameter
-                    ] = parameter_value
+                    node._mapping["properties"][column][parameter] = parameter_value
 
             if node.parent and node._mapping:
                 if "properties" not in node.parent._mapping:
@@ -383,13 +357,8 @@ def get_search_client(
         # API
         cloud_id: Optional[str] = settings.ELASTICSEARCH_CLOUD_ID
         api_key: Optional[Union[str, Tuple[str, str]]] = None
-        http_auth: Optional[
-            Union[str, Tuple[str, str]]
-        ] = settings.ELASTICSEARCH_HTTP_AUTH
-        if (
-            settings.ELASTICSEARCH_API_KEY_ID
-            and settings.ELASTICSEARCH_API_KEY
-        ):
+        http_auth: Optional[Union[str, Tuple[str, str]]] = settings.ELASTICSEARCH_HTTP_AUTH
+        if settings.ELASTICSEARCH_API_KEY_ID and settings.ELASTICSEARCH_API_KEY:
             api_key = (
                 settings.ELASTICSEARCH_API_KEY_ID,
                 settings.ELASTICSEARCH_API_KEY,
@@ -403,12 +372,8 @@ def get_search_client(
         ca_certs: Optional[str] = settings.ELASTICSEARCH_CA_CERTS
         client_cert: Optional[str] = settings.ELASTICSEARCH_CLIENT_CERT
         client_key: Optional[str] = settings.ELASTICSEARCH_CLIENT_KEY
-        ssl_assert_hostname: Optional[
-            str
-        ] = settings.ELASTICSEARCH_SSL_ASSERT_HOSTNAME
-        ssl_assert_fingerprint: Optional[
-            str
-        ] = settings.ELASTICSEARCH_SSL_ASSERT_FINGERPRINT
+        ssl_assert_hostname: Optional[str] = settings.ELASTICSEARCH_SSL_ASSERT_HOSTNAME
+        ssl_assert_fingerprint: Optional[str] = settings.ELASTICSEARCH_SSL_ASSERT_FINGERPRINT
         ssl_version: Optional[int] = settings.ELASTICSEARCH_SSL_VERSION
         ssl_context: Optional[Any] = settings.ELASTICSEARCH_SSL_CONTEXT
         ssl_show_warn: bool = settings.ELASTICSEARCH_SSL_SHOW_WARN
@@ -432,6 +397,7 @@ def get_search_client(
             ssl_version=ssl_version,
             ssl_context=ssl_context,
             ssl_show_warn=ssl_show_warn,
+            pool_maxsize=settings.OPENSEARCH_POOL_MAX_SIZE,
             # use_ssl=use_ssl,
             timeout=timeout,
         )
