@@ -23,6 +23,8 @@ click==8.1.7
     # via
     #   -r requirements/base.in
     #   black
+confluent-kafka==2.3.0
+    # via -r requirements/base.in
 coverage[toml]==7.4.0
     # via pytest-cov
 distlib==0.3.8

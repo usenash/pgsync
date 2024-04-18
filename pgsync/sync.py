@@ -42,6 +42,7 @@ from .exc import (
     RDSError,
     SchemaError,
 )
+from .kafka import KafkaProducer
 from .node import Node, Tree
 from .plugin import Plugins
 from .querybuilder import QueryBuilder
@@ -93,6 +94,8 @@ class Sync(Base, metaclass=Singleton):
         self._truncate: bool = False
         self._checkpoint_file: str = os.path.join(settings.CHECKPOINT_PATH, f".{self.__name}")
         self.redis: RedisQueue = RedisQueue(self.__name)
+
+        self.kafka_producer = KafkaProducer(topic=self.index)
 
         self.redis_client = Redis.from_url(
             get_redis_url(),
@@ -368,7 +371,12 @@ class Sync(Base, metaclass=Singleton):
                     continue
                 rows.append(row)
 
+            # publish to kafka
             all_payloads = [self.parse_logical_slot(row.data) for row in rows]
+
+            logger.info(f"Syncing {len(rows)} changes")
+            self.kafka_producer.produce_batch(data=all_payloads)
+
             payloads: List[Payload] = []
             ids_already_seen = set()
             bulk_ops = []

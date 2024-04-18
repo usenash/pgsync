@@ -141,6 +141,11 @@ REDIS_SOCKET_TIMEOUT = env.int("REDIS_SOCKET_TIMEOUT", default=5)
 # number of items to write to Redis at a time
 REDIS_WRITE_CHUNK_SIZE = env.int("REDIS_WRITE_CHUNK_SIZE", default=1000)
 
+# kafka
+KAFKA_BROKER_SERVERS = env.str("KAFKA_BROKER_SERVERS", default="localhost:9092")
+KAFKA_MAX_MSG_BEFORE_FLUSH = env.int("KAFKA_MAX_MSG_BEFORE_FLUSH", default=1000)
+KAFKA_MAX_SEC_BEFORE_FLUSH = env.int("KAFKA_MAX_SEC_BEFORE_FLUSH", default=60)
+
 
 # Logging:
 def _get_logging_config(silent_loggers: Optional[str] = None):

@@ -28,6 +28,8 @@ click==8.1.7
     #   -r requirements/base.in
     #   black
     #   pip-tools
+confluent-kafka==2.3.0
+    # via -r requirements/base.in
 coverage[toml]==7.4.0
     # via
     #   -r requirements/dev.in
