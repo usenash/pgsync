@@ -17,7 +17,7 @@ class KafkaProducer:
 
     def __init__(self, topic: str, **kwargs):
         """Performant kafka producer."""
-        self.topic = topic
+        self.topic = f"pgysnc-{topic}"
         self.producer = Producer(
             {
                 "bootstrap.servers": settings.KAFKA_BROKER_SERVERS,
