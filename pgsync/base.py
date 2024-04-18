@@ -55,13 +55,13 @@ class Payload(object):
 
     def __init__(
         self,
-        tg_op: str = Optional[None],
-        table: str = Optional[None],
-        schema: str = Optional[None],
-        old: dict = Optional[None],
-        new: dict = Optional[None],
-        xmin: int = Optional[None],
-        indices: List[str] = Optional[None],
+        tg_op: str | None = None,
+        table: str | None = None,
+        schema: str | None = None,
+        old: dict | None = None,
+        new: dict | None = None,
+        xmin: int | None = None,
+        indices: list[str] | None = None,
     ):
         self.tg_op: str = tg_op
         self.table: str = table
