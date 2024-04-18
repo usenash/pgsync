@@ -1,4 +1,5 @@
 """PGSync Base."""
+
 import logging
 import os
 from typing import List, Optional, Set, Tuple
@@ -68,7 +69,7 @@ class Payload(object):
         self.old: dict = old or {}
         self.new: dict = new or {}
         self.xmin: str = xmin
-        self.indices: List[str] = indices
+        self.indices: list[str] = indices
 
     @property
     def data(self) -> dict:
@@ -76,6 +77,17 @@ class Payload(object):
         if self.tg_op == DELETE and self.old:
             return self.old
         return self.new
+
+    def to_dict(self):
+        return {
+            "tg_op": self.tg_op,
+            "table": self.table,
+            "schema": self.schema,
+            "old": self.old,
+            "new": self.new,
+            "xmin": self.xmin,
+            "indices": self.indices,
+        }
 
     def foreign_key_constraint(self, model) -> dict:
         """
@@ -101,9 +113,7 @@ class Payload(object):
                     constraints[referred_table] = {
                         "local": foreign_key.constraint.column_keys[0],
                         "remote": foreign_key.column.name,
-                        "value": self.data[
-                            foreign_key.constraint.column_keys[0]
-                        ],
+                        "value": self.data[foreign_key.constraint.column_keys[0]],
                     }
         return constraints
 
@@ -128,13 +138,9 @@ class TupleIdentifierType(sa.types.UserDefinedType):
 
 
 class Base(object):
-    def __init__(
-        self, database: str, verbose: bool = False, *args, **kwargs
-    ) -> None:
+    def __init__(self, database: str, verbose: bool = False, *args, **kwargs) -> None:
         """Initialize the base class constructor."""
-        self.__engine: sa.engine.Engine = _pg_engine(
-            database, echo=False, **kwargs
-        )
+        self.__engine: sa.engine.Engine = _pg_engine(database, echo=False, **kwargs)
         self.__schemas: Optional[dict] = None
         # models is a dict of f'{schema}.{table}'
         self.__models: dict = {}
@@ -205,24 +211,16 @@ class Base(object):
                 self.__metadata[schema] = metadata
             metadata = self.__metadata[schema]
             if name not in metadata.tables:
-                raise TableNotFoundError(
-                    f'Table "{name}" not found in registry'
-                )
+                raise TableNotFoundError(f'Table "{name}" not found in registry')
             model = metadata.tables[name]
             model.append_column(sa.Column("xmin", sa.BigInteger))
             model.append_column(sa.Column("ctid"), TupleIdentifierType)
             # support SQLAlchemy/Postgres 14 which somehow now reflects
             # the oid column
             if "oid" not in [column.name for column in model.columns]:
-                model.append_column(
-                    sa.Column("oid", sa.dialects.postgresql.OID)
-                )
+                model.append_column(sa.Column("oid", sa.dialects.postgresql.OID))
             model = model.alias()
-            setattr(
-                model,
-                "primary_keys",
-                sorted([primary_key.key for primary_key in model.primary_key]),
-            )
+            model.primary_keys = sorted([primary_key.key for primary_key in model.primary_key])
             self.__models[f"{model.original}"] = model
 
         return self.__models[name]
@@ -282,26 +280,20 @@ class Base(object):
         """Get the database table indexes."""
         if (table, schema) not in self.__indices:
             indexes = sa.inspect(self.engine).get_indexes(table, schema=schema)
-            self.__indices[(table, schema)] = sorted(
-                indexes, key=lambda d: d["name"]
-            )
+            self.__indices[(table, schema)] = sorted(indexes, key=lambda d: d["name"])
         return self.__indices[(table, schema)]
 
     def tables(self, schema: str) -> list:
         """Get the table names for current schema."""
         if schema not in self.__tables:
-            self.__tables[schema] = sorted(
-                sa.inspect(self.engine).get_table_names(schema)
-            )
+            self.__tables[schema] = sorted(sa.inspect(self.engine).get_table_names(schema))
         return self.__tables[schema]
 
     def columns(self, schema: str, table: str) -> list:
         """Get the column names for a table/view."""
         if (table, schema) not in self.__columns:
             columns = sa.inspect(self.engine).get_columns(table, schema=schema)
-            self.__columns[(table, schema)] = sorted(
-                [column["name"] for column in columns]
-            )
+            self.__columns[(table, schema)] = sorted([column["name"] for column in columns])
         return self.__columns[(table, schema)]
 
     def truncate_table(self, table: str, schema: str = DEFAULT_SCHEMA) -> None:
@@ -319,9 +311,7 @@ class Base(object):
         logger.debug(f"Truncating table: {schema}.{table}")
         self.execute(sa.DDL(f'TRUNCATE TABLE "{schema}"."{table}" CASCADE'))
 
-    def truncate_tables(
-        self, tables: List[str], schema: str = DEFAULT_SCHEMA
-    ) -> None:
+    def truncate_tables(self, tables: List[str], schema: str = DEFAULT_SCHEMA) -> None:
         """Truncate all tables."""
         logger.debug(f"Truncating tables: {tables}")
         for table in tables:
@@ -366,7 +356,7 @@ class Base(object):
     def create_replication_slot(self, slot_name: str) -> None:
         """Create a replication slot.
 
-        TODO:
+        Todo:
         - Only create the replication slot if it does not exist
           otherwise warn that it already exists and return
 
@@ -411,9 +401,7 @@ class Base(object):
         offset: Optional[int] = None,
     ) -> sa.sql.Select:
         filters: list = []
-        statement: sa.sql.Select = sa.select(
-            [sa.column("xid"), sa.column("data")]
-        ).select_from(
+        statement: sa.sql.Select = sa.select([sa.column("xid"), sa.column("data")]).select_from(
             func(
                 slot_name,
                 upto_lsn,
@@ -530,9 +518,7 @@ class Base(object):
             upto_nchanges=upto_nchanges,
         )
         with self.engine.connect() as conn:
-            return conn.execute(
-                statement.with_only_columns([sa.func.COUNT()])
-            ).scalar()
+            return conn.execute(statement.with_only_columns([sa.func.COUNT()])).scalar()
 
     # Views...
     def create_view(
@@ -559,14 +545,10 @@ class Base(object):
         self.engine.execute(DropView(schema, MATERIALIZED_VIEW))
         logger.debug(f"Dropped view: {schema}.{MATERIALIZED_VIEW}")
 
-    def refresh_view(
-        self, name: str, schema: str, concurrently: bool = False
-    ) -> None:
+    def refresh_view(self, name: str, schema: str, concurrently: bool = False) -> None:
         """Refresh a materialized view."""
         logger.debug(f"Refreshing view: {schema}.{name}")
-        self.engine.execute(
-            RefreshView(schema, name, concurrently=concurrently)
-        )
+        self.engine.execute(RefreshView(schema, name, concurrently=concurrently))
         logger.debug(f"Refreshed view: {schema}.{name}")
 
     # Triggers...
@@ -579,9 +561,7 @@ class Base(object):
         """Create a database triggers."""
         queries: List[str] = []
         for table in self.tables(schema):
-            if (tables and table not in tables) or (
-                table in self.views(schema)
-            ):
+            if (tables and table not in tables) or (table in self.views(schema)):
                 continue
             logger.debug(f"Creating trigger on table: {schema}.{table}")
             for name, level, tg_op in [
@@ -615,10 +595,7 @@ class Base(object):
                 continue
             logger.debug(f"Dropping trigger on table: {schema}.{table}")
             for name in ("notify", "truncate"):
-                queries.append(
-                    f'DROP TRIGGER IF EXISTS "{table}_{name}" ON '
-                    f'"{schema}"."{table}"'
-                )
+                queries.append(f'DROP TRIGGER IF EXISTS "{table}_{name}" ON ' f'"{schema}"."{table}"')
         if join_queries:
             if queries:
                 self.execute(sa.DDL("; ".join(queries)))
@@ -638,35 +615,21 @@ class Base(object):
         )
 
     def drop_function(self, schema: str) -> None:
-        self.execute(
-            sa.DDL(
-                f'DROP FUNCTION IF EXISTS "{schema}".{TRIGGER_FUNC}() CASCADE'
-            )
-        )
+        self.execute(sa.DDL(f'DROP FUNCTION IF EXISTS "{schema}".{TRIGGER_FUNC}() CASCADE'))
 
     def disable_triggers(self, schema: str) -> None:
         """Disable all pgsync defined triggers in database."""
         for table in self.tables(schema):
             logger.debug(f"Disabling trigger on table: {schema}.{table}")
             for name in ("notify", "truncate"):
-                self.execute(
-                    sa.DDL(
-                        f'ALTER TABLE "{schema}"."{table}" '
-                        f"DISABLE TRIGGER {table}_{name}"
-                    )
-                )
+                self.execute(sa.DDL(f'ALTER TABLE "{schema}"."{table}" ' f"DISABLE TRIGGER {table}_{name}"))
 
     def enable_triggers(self, schema: str) -> None:
         """Enable all pgsync defined triggers in database."""
         for table in self.tables(schema):
             logger.debug(f"Enabling trigger on table: {schema}.{table}")
             for name in ("notify", "truncate"):
-                self.execute(
-                    sa.DDL(
-                        f'ALTER TABLE "{schema}"."{table}" '
-                        f"ENABLE TRIGGER {table}_{name}"
-                    )
-                )
+                self.execute(sa.DDL(f'ALTER TABLE "{schema}"."{table}" ' f"ENABLE TRIGGER {table}_{name}"))
 
     @property
     def txid_current(self) -> int:
@@ -680,9 +643,7 @@ class Base(object):
             label="txid_current",
         )[0]
 
-    def parse_value(
-        self, type_: str, value: str
-    ) -> None | int | str | bool | float:
+    def parse_value(self, type_: str, value: str) -> None | int | str | bool | float:
         """
         Parse datatypes from db.
 
@@ -785,9 +746,7 @@ class Base(object):
         else:
             # this can be an INSERT, DELETE, UPDATE or TRUNCATE operation
             if payload.tg_op not in TG_OP:
-                raise LogicalSlotParseError(
-                    f"Unknown {payload.tg_op} operation for row: {row}"
-                )
+                raise LogicalSlotParseError(f"Unknown {payload.tg_op} operation for row: {row}")
 
             for key, value in _parse_logical_slot(suffix):
                 payload.new[key] = value
@@ -851,9 +810,7 @@ class Base(object):
         chunk_size = chunk_size or QUERY_CHUNK_SIZE
         stream_results = stream_results or STREAM_RESULTS
         with self.engine.connect() as conn:
-            result = conn.execution_options(
-                stream_results=stream_results
-            ).execute(statement.select())
+            result = conn.execution_options(stream_results=stream_results).execute(statement.select())
             for partition in result.partitions(chunk_size):
                 for keys, row, *primary_keys in partition:
                     yield keys, row, primary_keys
@@ -862,11 +819,7 @@ class Base(object):
 
     def fetchcount(self, statement: sa.sql.Subquery) -> int:
         with self.engine.connect() as conn:
-            return conn.execute(
-                statement.original.with_only_columns(
-                    [sa.func.COUNT()]
-                ).order_by(None)
-            ).scalar()
+            return conn.execute(statement.original.with_only_columns([sa.func.COUNT()]).order_by(None)).scalar()
 
 
 # helper methods
@@ -1046,11 +999,7 @@ def database_exists(database: str, echo: bool = False) -> bool:
     with pg_engine("postgres", echo=echo) as engine:
         conn = engine.connect()
         try:
-            row = conn.execute(
-                sa.DDL(
-                    f"SELECT 1 FROM pg_database WHERE datname = '{database}'"
-                )
-            ).first()
+            row = conn.execute(sa.DDL(f"SELECT 1 FROM pg_database WHERE datname = '{database}'")).first()
             conn.close()
         except Exception as e:
             logger.exception(f"Exception {e}")
@@ -1058,9 +1007,7 @@ def database_exists(database: str, echo: bool = False) -> bool:
         return row is not None
 
 
-def create_extension(
-    database: str, extension: str, echo: bool = False
-) -> None:
+def create_extension(database: str, extension: str, echo: bool = False) -> None:
     """Create a database extension."""
     logger.debug(f"Creating extension: {extension}")
     with pg_engine(database, echo=echo) as engine:

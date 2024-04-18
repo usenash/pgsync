@@ -373,9 +373,13 @@ class Sync(Base, metaclass=Singleton):
 
             # publish to kafka
             all_payloads = [self.parse_logical_slot(row.data) for row in rows]
-
+            st = time.time()
             logger.info(f"Syncing {len(rows)} changes")
-            self.kafka_producer.produce_batch(data=all_payloads)
+            for p in all_payloads:
+                self.kafka_producer.produce(data=p.to_dict())
+
+            self.kafka_producer.possibly_flush(force=True)
+            logger.info(f"published {len(rows)} changes to kafka, took {time.time() - st} seconds")
 
             payloads: List[Payload] = []
             ids_already_seen = set()

@@ -47,7 +47,7 @@ class KafkaProducer:
                 message_id = message_id.decode("utf-8")
             logger.info("Message %s failed delivery: %s", message_id, err)
 
-    def _possibly_flush(self, force=False):
+    def possibly_flush(self, force=False):
         """Flush the producer if it's getting big or hasn't been flushed in a while."""
         if (
             force
@@ -67,7 +67,7 @@ class KafkaProducer:
                 **kwargs,
             )
             _ = self.producer.poll(0)
-            self._possibly_flush()
+            self.possibly_flush()
 
         except BufferError as e:
             st = time.time()
