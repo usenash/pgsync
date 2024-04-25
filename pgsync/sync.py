@@ -95,7 +95,7 @@ class Sync(Base, metaclass=Singleton):
         self._checkpoint_file: str = os.path.join(settings.CHECKPOINT_PATH, f".{self.__name}")
         self.redis: RedisQueue = RedisQueue(self.__name)
 
-        self.kafka_producer = KafkaProducer(topic=self.index)
+        self.kafka_producer = KafkaProducer(topic=self.index) if settings.KAFKA_ENABLE_PUBLISH else None
 
         self.redis_client = Redis.from_url(
             get_redis_url(),
