@@ -391,9 +391,10 @@ class Sync(Base, metaclass=Singleton):
                 for payload in all_payloads
                 if payload.tg_op == "INSERT" and payload.table == self.tree.root.table
             ]
-            ops_to_add = list(self._payloads(root_inserts))
-            self._bulk_index_and_remove_duplicates(ops_to_add)
-            ids_already_seen.update(extract_ids(ops_to_add))
+            if root_inserts:
+                ops_to_add = list(self._payloads(root_inserts))
+                self._bulk_index_and_remove_duplicates(ops_to_add)
+                ids_already_seen.update(extract_ids(ops_to_add))
 
             # index root updates
             root_updates = [
@@ -404,10 +405,11 @@ class Sync(Base, metaclass=Singleton):
                 and payload.data.get("id") not in ids_already_seen
             ]
             # deduplicate root updates
-            root_updates = list({payload.data.get("id"): payload for payload in root_updates}.values())
-            ops_to_add = list(self._payloads(root_updates))
-            self._bulk_index_and_remove_duplicates(ops_to_add)
-            ids_already_seen.update(extract_ids(ops_to_add))
+            if root_updates:
+                root_updates = list({payload.data.get("id"): payload for payload in root_updates}.values())
+                ops_to_add = list(self._payloads(root_updates))
+                self._bulk_index_and_remove_duplicates(ops_to_add)
+                ids_already_seen.update(extract_ids(ops_to_add))
 
             all_payloads = [payload for payload in all_payloads if payload.data.get("id") not in ids_already_seen]
 
@@ -793,6 +795,9 @@ class Sync(Base, metaclass=Singleton):
         ]
 
         """
+        if not payloads:
+            return
+
         payload: Payload = payloads[0]
         if payload.tg_op not in TG_OP:
             logger.exception(f"Unknown tg_op {payload.tg_op}")
