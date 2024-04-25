@@ -80,17 +80,17 @@ class Sync(Base, metaclass=Singleton):
     ) -> None:
         """Constructor."""
         self.index: str = document.get("index") or document["database"]
-        self.pipeline: str = document.get("pipeline")
+        self.pipeline: str | None = document.get("pipeline")
         self.plugins: list = document.get("plugins", [])
         self.nodes: dict = document.get("nodes", {})
-        self.setting: dict = document.get("setting")
-        self.mapping: dict = document.get("mapping")
-        self.routing: str = document.get("routing")
+        self.setting: dict | None = document.get("setting")
+        self.mapping: dict | None = document.get("mapping")
+        self.routing: str | None = document.get("routing")
         super().__init__(document.get("database", self.index), verbose=verbose, **kwargs)
         self.search_client: SearchClient = SearchClient()
         self.__name: str = re.sub("[^0-9a-zA-Z_]+", "", f"{self.database.lower()}_{self.index}")
-        self._checkpoint: int = None
-        self._plugins: Plugins = None
+        self._checkpoint: int | None = None
+        self._plugins: Plugins | None = None
         self._truncate: bool = False
         self._checkpoint_file: str = os.path.join(settings.CHECKPOINT_PATH, f".{self.__name}")
         self.redis: RedisQueue = RedisQueue(self.__name)
@@ -109,10 +109,10 @@ class Sync(Base, metaclass=Singleton):
         if self.plugins:
             self._plugins: Plugins = Plugins("plugins", self.plugins)
         self.query_builder: QueryBuilder = QueryBuilder(verbose=verbose)
-        self.count: dict = dict(xlog=0, db=0, redis=0)
+        self.count: dict = {"xlog": 0, "db": 0, "redis": 0}
         self.table_list: list = [f"table public.{table}" for table in self.tree.tables]
         self.table2cols: dict[str, list[str]] = {
-            f"{node.table}": node.column_names for node in list(self.tree.root.traverse_breadth_first())
+            f"{node.table}": node.column_names for node in self.tree.traverse_breadth_first()
         }
         logger.info(f"Table list: {self.table_list}")
 
@@ -373,17 +373,49 @@ class Sync(Base, metaclass=Singleton):
 
             # publish to kafka
             all_payloads = [self.parse_logical_slot(row.data) for row in rows]
-            st = time.time()
-            logger.info(f"Syncing {len(rows)} changes")
-            for p in all_payloads:
-                self.kafka_producer.produce(data=p.to_dict())
+            num_rows = len(rows)
+            if settings.KAFKA_ENABLE_PUBLISH:
+                st = time.time()
+                logger.info(f"Syncing {len(rows)} changes")
+                for p in all_payloads:
+                    self.kafka_producer.produce(data=p.to_dict())
 
-            self.kafka_producer.possibly_flush(force=True)
-            logger.info(f"published {len(rows)} changes to kafka, took {time.time() - st} seconds")
+                self.kafka_producer.possibly_flush(force=True)
+                logger.info(f"published {len(rows)} changes to kafka, took {time.time() - st} seconds")
+
+            ids_already_seen = set()
+
+            # index root inserts
+            root_inserts = [
+                payload
+                for payload in all_payloads
+                if payload.tg_op == "INSERT" and payload.table == self.tree.root.table
+            ]
+            ops_to_add = list(self._payloads(root_inserts))
+            self._bulk_index_and_remove_duplicates(ops_to_add)
+            ids_already_seen.update(extract_ids(ops_to_add))
+
+            # index root updates
+            root_updates = [
+                payload
+                for payload in all_payloads
+                if payload.tg_op == "UPDATE"
+                and payload.table == self.tree.root.table
+                and payload.data.get("id") not in ids_already_seen
+            ]
+            ops_to_add = list(self._payloads(root_updates))
+            self._bulk_index_and_remove_duplicates(ops_to_add)
+            ids_already_seen.update(extract_ids(ops_to_add))
+
+            all_payloads = [payload for payload in all_payloads if payload.data.get("id") not in ids_already_seen]
+
+            logger.info(
+                f"Compressed {num_rows} changes to {len(all_payloads)} after indexing {len(root_inserts)} root inserts and {len(root_updates)} updates"
+            )
 
             payloads: List[Payload] = []
-            ids_already_seen = set()
             bulk_ops = []
+            ids_already_seen = set()
             for i, payload in enumerate(all_payloads):
                 if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
                     # we don't need to update the same record twice
@@ -396,6 +428,7 @@ class Sync(Base, metaclass=Singleton):
                             payloads = []
 
                     continue
+
                 payloads.append(payload)
 
                 if i + 1 < len(all_payloads):
@@ -446,17 +479,9 @@ class Sync(Base, metaclass=Singleton):
         self.search_client.bulk(self.index, list(reversed(to_index)))
 
     def _root_primary_key_resolver(self, node: Node, payload: Payload, filters: list) -> list:
-        fields: dict = defaultdict(list)
-        primary_values: list = [payload.data[key] for key in node.model.primary_keys]
-        primary_fields: dict = dict(zip(node.model.primary_keys, primary_values))
-        for key, value in primary_fields.items():
-            fields[key].append(value)
+        fields: dict = {key: [payload.data[key]] for key in node.model.primary_keys}
         for doc_id in self.search_client._search(self.index, node.table, fields):
-            where: dict = {}
-            params: dict = doc_id.split(PRIMARY_KEY_DELIMITER)
-            for i, key in enumerate(self.tree.root.model.primary_keys):
-                where[key] = params[i]
-            filters.append(where)
+            filters.append(dict(zip(self.tree.root.model.primary_keys, doc_id.split(PRIMARY_KEY_DELIMITER))))
 
         return filters
 
@@ -494,6 +519,44 @@ class Sync(Base, metaclass=Singleton):
 
         return filters
 
+    def resolve_root_node_filters(self, node: Node, payload: Payload, foreign_keys: dict, filters: list) -> list:
+        """
+        Combined logic to resolve filters based on root node's primary keys and foreign keys
+        with a single search operation to Elasticsearch/OpenSearch.
+
+        This method handles n-tiers relationships (n > 3) where we insert/update a new leaf node.
+        It looks up the affected root node by the insert/update operation and syncs the tree branch for that root.
+        """
+        # Collect fields for primary key search
+        primary_fields: dict = {key: [payload.data[key]] for key in node.model.primary_keys}
+
+        # Collect fields for foreign key search if applicable
+        foreign_fields: dict = defaultdict(list)
+        if foreign_keys:
+            foreign_values: list = [payload.new.get(key) for key in foreign_keys[node.name]]
+            for key in [key.name for key in node.primary_keys]:
+                for value in foreign_values:
+                    if value:
+                        foreign_fields[key].append(value)
+
+        # Combine primary and foreign key fields
+        combined_fields: dict = defaultdict(list)
+        for key, values in primary_fields.items():
+            combined_fields[key].extend(values)
+        for key, values in foreign_fields.items():
+            combined_fields[key].extend(values)
+
+        # Perform a single search with combined fields
+        search_table = node.table if not foreign_keys else node.parent.table
+        for doc_id in self.search_client._search(self.index, search_table, combined_fields):
+            where: dict = {}
+            params: dict = doc_id.split(PRIMARY_KEY_DELIMITER)
+            for i, key in enumerate(self.tree.root.model.primary_keys):
+                where[key] = params[i]
+            filters.append(where)
+
+        return filters
+
     def _through_node_resolver(self, node: Node, payload: Payload, filters: list) -> list:
         """Handle where node is a through table with a direct references to
         root
@@ -512,11 +575,9 @@ class Sync(Base, metaclass=Singleton):
     def _insert_op(self, node: Node, filters: dict, payloads: List[Payload]) -> dict:
         if node.table in self.tree.tables:
             if node.is_root:
-                for payload in payloads:
-                    primary_values = [payload.data[key] for key in self.tree.root.model.primary_keys]
-                    primary_fields = dict(zip(self.tree.root.model.primary_keys, primary_values))
-                    filters[node.table].append({key: value for key, value in primary_fields.items()})
-
+                filters[node.table].extend(
+                    [{key: payload.data[key] for key in self.tree.root.model.primary_keys} for payload in payloads]
+                )
             else:
                 if not node.parent:
                     logger.exception(f"Could not get parent from node: {node.name}")
@@ -581,11 +642,11 @@ class Sync(Base, metaclass=Singleton):
                 primary_values: list = [payload.data[key] for key in node.model.primary_keys]
                 primary_fields: dict = dict(zip(node.model.primary_keys, primary_values))
                 filters[node.table].append({key: value for key, value in primary_fields.items()})
+                # e.g.
+                # filters = {'jobs':[{'id': 'job_bYMVhhb5nqz3F8AsttyiZZ'}]}
 
                 old_values: list = []
-                for key in self.tree.root.model.primary_keys:
-                    if key in payload.old.keys():
-                        old_values.append(payload.old[key])
+                old_values = [payload.old[key] for key in self.tree.root.model.primary_keys if key in payload.old]
 
                 new_values = [payload.new[key] for key in self.tree.root.model.primary_keys]
 
@@ -597,8 +658,6 @@ class Sync(Base, metaclass=Singleton):
                     }
                     if self.routing:
                         doc["_routing"] = old_values[self.routing]
-                    if self.search_client.major_version < 7 and not self.search_client.is_opensearch:
-                        doc["_type"] = "_doc"
                     docs.append(doc)
 
             if docs:
@@ -622,6 +681,11 @@ class Sync(Base, metaclass=Singleton):
                             node,
                         )
 
+                    # _filters = self.resolve_root_node_filters(
+                    #     node, payload, foreign_keys=foreign_keys, filters=_filters
+                    # )
+                    # else:
+                    #     _filters = self._root_primary_key_resolver(node, payload, _filters)
                     _filters = self._root_foreign_key_resolver(node, payload, foreign_keys, _filters)
 
                 if _filters:
@@ -756,11 +820,11 @@ class Sync(Base, metaclass=Singleton):
         # logger.debug(f"tg_op: {payload.tg_op} table: {node.name}")
 
         filters: dict = {
-            node.table: [],
             self.tree.root.table: [],
         }
         if not node.is_root:
             filters[node.parent.table] = []
+            filters[node.table] = []
 
         if payload.tg_op == INSERT:
             filters = self._insert_op(
@@ -810,6 +874,10 @@ class Sync(Base, metaclass=Singleton):
                 ]
             }
             """
+            # Deduplicate filters to avoid redundant queries
+            # for table, filter_list in filters.items():
+            #     filters[table] = [dict(t) for t in {tuple(d.items()) for d in filter_list}]
+
             for l1 in chunks(filters.get(self.tree.root.table), settings.FILTER_CHUNK_SIZE):
                 if filters.get(node.table):
                     for l2 in chunks(filters.get(node.table), settings.FILTER_CHUNK_SIZE):

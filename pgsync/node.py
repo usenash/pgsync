@@ -1,4 +1,5 @@
 """PGSync Node class representation."""
+
 from __future__ import annotations
 
 import re
@@ -32,20 +33,16 @@ from .exc import (
 
 @dataclass
 class ForeignKey:
-    foreign_key: Optional[dict] = None
+    foreign_key: dict | None = None
 
     def __post_init__(self):
         """Foreignkey constructor."""
-        self.foreign_key: str = self.foreign_key or dict()
+        self.foreign_key = self.foreign_key or {}
         self.parent: str = self.foreign_key.get("parent")
         self.child: str = self.foreign_key.get("child")
         if self.foreign_key:
-            if sorted(self.foreign_key.keys()) != sorted(
-                RELATIONSHIP_FOREIGN_KEYS
-            ):
-                raise RelationshipForeignKeyError(
-                    "ForeignKey Relationship must contain a parent and child."
-                )
+            if sorted(self.foreign_key.keys()) != sorted(RELATIONSHIP_FOREIGN_KEYS):
+                raise RelationshipForeignKeyError("ForeignKey Relationship must contain a parent and child.")
         self.parent = self.foreign_key.get("parent")
         self.child = self.foreign_key.get("child")
 
@@ -55,7 +52,7 @@ class ForeignKey:
 
 @dataclass
 class Relationship:
-    relationship: Optional[dict] = None
+    relationship: dict | None = None
 
     def __post_init__(self):
         """Relationship constructor."""
@@ -65,34 +62,20 @@ class Relationship:
         self.tables: List[str] = self.relationship.get("through_tables", [])
         self.throughs: List[Node] = []
 
-        if not set(self.relationship.keys()).issubset(
-            set(RELATIONSHIP_ATTRIBUTES)
-        ):
-            attrs = set(self.relationship.keys()).difference(
-                set(RELATIONSHIP_ATTRIBUTES)
-            )
-            raise RelationshipAttributeError(
-                f"Relationship attribute {attrs} is invalid."
-            )
+        if not set(self.relationship.keys()).issubset(set(RELATIONSHIP_ATTRIBUTES)):
+            attrs = set(self.relationship.keys()).difference(set(RELATIONSHIP_ATTRIBUTES))
+            raise RelationshipAttributeError(f"Relationship attribute {attrs} is invalid.")
         if self.type and self.type not in RELATIONSHIP_TYPES:
-            raise RelationshipTypeError(
-                f'Relationship type "{self.type}" is invalid.'
-            )
+            raise RelationshipTypeError(f'Relationship type "{self.type}" is invalid.')
         if self.variant and self.variant not in RELATIONSHIP_VARIANTS:
-            raise RelationshipVariantError(
-                f'Relationship variant "{self.variant}" is invalid.'
-            )
+            raise RelationshipVariantError(f'Relationship variant "{self.variant}" is invalid.')
         if len(self.tables) > 1:
-            raise MultipleThroughTablesError(
-                f"Multiple through tables: {self.tables}"
-            )
+            raise MultipleThroughTablesError(f"Multiple through tables: {self.tables}")
         if self.type:
             self.type = self.type.lower()
         if self.variant:
             self.variant = self.variant.lower()
-        self.foreign_key: ForeignKey = ForeignKey(
-            self.relationship.get("foreign_key")
-        )
+        self.foreign_key: ForeignKey = ForeignKey(self.relationship.get("foreign_key"))
 
     def __str__(self):
         return f"relationship: {self.variant}.{self.type}:{self.tables}"
@@ -103,26 +86,26 @@ class Node(object):
     models: Callable
     table: str
     schema: str
-    primary_key: Optional[list] = None
-    label: Optional[str] = None
-    transform: Optional[dict] = None
-    columns: Optional[list] = None
-    relationship: Optional[dict] = None
-    parent: Optional[Node] = None
-    base_tables: Optional[list] = None
+    primary_key: list | None = None
+    label: str | None = None
+    transform: dict | None = None
+    columns: list | None = None
+    relationship: dict | None = None
+    parent: Node | None = None
+    base_tables: list | None = None
+
+    has_node_setup: bool = False
 
     def __post_init__(self):
         self.model: sa.sql.Alias = self.models(self.table, self.schema)
         self.columns = self.columns or []
-        self.children: List[Node] = []
-        self.table_columns: List[str] = self.model.columns.keys()
+        self.children: list[Node] = []
+        self.table_columns: list[str] = self.model.columns.keys()
         if not self.model.primary_keys:
-            setattr(self.model, "primary_keys", self.primary_key)
+            self.model.primary_keys = self.primary_key
 
         # columns to fetch
-        self.column_names: List[str] = [
-            column for column in self.columns if isinstance(column, str)
-        ]
+        self.column_names: List[str] = [column for column in self.columns if isinstance(column, str)]
         if not self.column_names:
             self.column_names = [str(column) for column in self.table_columns]
             for name in ("ctid", "oid", "xmin"):
@@ -159,6 +142,10 @@ class Node(object):
         return hash(self.name)
 
     def setup(self):
+        """Setup node columns."""
+        if self.has_node_setup:
+            return
+
         self.columns = []
 
         for column_name in self.column_names:
@@ -179,32 +166,22 @@ class Node(object):
                         token = int(token)
                     tokenized = tokenized(token)
                 self.columns.append(
-                    "_".join(
-                        [
-                            x.replace("{", "").replace("}", "")
-                            for x in tokens
-                            if x not in JSONB_OPERATORS
-                        ]
-                    )
+                    "_".join([x.replace("{", "").replace("}", "") for x in tokens if x not in JSONB_OPERATORS])
                 )
                 self.columns.append(tokenized)
                 # compiled_query(self.columns[-1], 'JSONB Query')
 
             else:
                 if column_name not in self.table_columns:
-                    raise ColumnNotFoundError(
-                        f'Column "{column_name}" not present on '
-                        f'table "{self.table}"'
-                    )
+                    raise ColumnNotFoundError(f'Column "{column_name}" not present on ' f'table "{self.table}"')
                 self.columns.append(column_name)
                 self.columns.append(self.model.c[column_name])
 
+        self.has_node_setup = True
+
     @property
     def primary_keys(self):
-        return [
-            self.model.c[str(sa.text(primary_key))]
-            for primary_key in self.model.primary_keys
-        ]
+        return [self.model.c[str(sa.text(primary_key))] for primary_key in self.model.primary_keys]
 
     @property
     def is_root(self) -> bool:
@@ -217,13 +194,9 @@ class Node(object):
 
     def add_child(self, node: Node) -> None:
         """All nodes except the root node must have a relationship defined."""
-        node.parent: Node = self
-        if not node.is_root and (
-            not node.relationship.type or not node.relationship.variant
-        ):
-            raise RelationshipError(
-                f'Relationship not present on "{node.name}"'
-            )
+        node.parent = self
+        if not node.is_root and (not node.relationship.type or not node.relationship.variant):
+            raise RelationshipError(f'Relationship not present on "{node.name}"')
         if node not in self.children:
             self.children.append(node)
 
@@ -247,7 +220,7 @@ class Node(object):
             for child in node.children:
                 stack.append(child)
 
-    def traverse_post_order(self) -> Generator:
+    def traverse_post_order(self) -> Generator[Node, None, None]:
         for child in self.children:
             yield from child.traverse_post_order()
         yield self
@@ -257,25 +230,30 @@ class Node(object):
 class Tree:
     models: Callable
 
+    post_order_traverse: list[Node] | None = None
+    breadth_first_traverse: list[Node] | None = None
+
     def __post_init__(self):
         self.tables: Set[str] = set()
-        self.__nodes: Dict[Node] = {}
+        self.__nodes: Dict[tuple[str, str], Node] = {}
         self.root: Optional[Node] = None
 
     def display(self) -> None:
         self.root.display()
 
-    def traverse_breadth_first(self) -> Generator:
-        return self.root.traverse_breadth_first()
+    def traverse_breadth_first(self) -> list[Node]:
+        if not self.breadth_first_traverse:
+            self.breadth_first_traverse = list(self.root.traverse_breadth_first())
+        return self.breadth_first_traverse
 
-    def traverse_post_order(self) -> Generator:
-        return self.root.traverse_post_order()
+    def traverse_post_order(self) -> list[Node]:
+        if not self.post_order_traverse:
+            self.post_order_traverse = list(self.root.traverse_post_order())
+        return self.post_order_traverse
 
     def build(self, data: dict) -> Node:
         if not isinstance(data, dict):
-            raise SchemaError(
-                "Incompatible schema. Please run v2 schema migration"
-            )
+            raise SchemaError("Incompatible schema. Please run v2 schema migration")
         table: str = data.get("table")
         schema: str = data.get("schema", DEFAULT_SCHEMA)
         key: Tuple[str, str] = (schema, table)

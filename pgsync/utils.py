@@ -1,4 +1,5 @@
 """PGSync utils."""
+
 import json
 import logging
 import os
@@ -7,7 +8,7 @@ import threading
 from datetime import timedelta
 from string import Template
 from time import time
-from typing import Callable, Generator, Optional, Set
+from typing import Callable, Generator, Optional, Set, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import click
@@ -23,8 +24,10 @@ logger = logging.getLogger(__name__)
 HIGHLIGHT_BEGIN = "\033[4m"
 HIGHLIGHT_END = "\033[0m:"
 
+T = TypeVar("T")
 
-def chunks(value: list, size: int) -> list:
+
+def chunks(value: list[T], size: int) -> Generator[list[T], None, None]:
     """Yield successive n-sized chunks from l"""
     for i in range(0, len(value), size):
         yield value[i : i + size]
@@ -35,7 +38,7 @@ def timeit(func: Callable):
         since: float = time()
         fn = func(*args, **kwargs)
         until: float = time()
-        sys.stdout.write(f"{func.__name__}: {until-since} secs\n")
+        sys.stdout.write(f"{func.__name__}: {until - since} secs\n")
         return fn
 
     return timed
@@ -51,19 +54,14 @@ class Timer:
 
     def __exit__(self, *args):
         elapsed: float = time() - self.start
-        sys.stdout.write(
-            f"{self.message} {(timedelta(seconds=elapsed))} "
-            f"({elapsed:2.2f} sec)\n"
-        )
+        sys.stdout.write(f"{self.message} {(timedelta(seconds=elapsed))} " f"({elapsed:2.2f} sec)\n")
 
 
 def threaded(func: Callable):
     """Decorator for threaded code execution."""
 
     def wrapper(*args, **kwargs) -> threading.Thread:
-        thread: threading.Thread = threading.Thread(
-            target=func, args=args, kwargs=kwargs
-        )
+        thread: threading.Thread = threading.Thread(target=func, args=args, kwargs=kwargs)
         thread.start()
         return thread
 
@@ -78,10 +76,7 @@ def exception(func: Callable):
             fn = func(*args, **kwargs)
         except Exception as e:
             name: str = threading.current_thread().name
-            sys.stdout.write(
-                f"Exception in {func.__name__}() for thread {name}: {e}\n"
-                f"Exiting...\n"
-            )
+            sys.stdout.write(f"Exception in {func.__name__}() for thread {name}: {e}\n" f"Exiting...\n")
             os._exit(-1)
         else:
             return fn
@@ -94,9 +89,7 @@ def get_redacted_url(result: ParseResult) -> ParseResult:
         username: Optional[str] = result.username
         hostname: Optional[str] = result.hostname
         if username and hostname:
-            result = result._replace(
-                netloc=f"{username}:{'*' * len(result.password)}@{hostname}"
-            )
+            result = result._replace(netloc=f"{username}:{'*' * len(result.password)}@{hostname}")
     return result
 
 
@@ -108,9 +101,7 @@ def show_settings(schema: Optional[str] = None) -> None:
     logger.info(f"{HIGHLIGHT_BEGIN}Checkpoint{HIGHLIGHT_END}")
     logger.info(f"Path: {CHECKPOINT_PATH}")
     logger.info(f"{HIGHLIGHT_BEGIN}Postgres{HIGHLIGHT_END}")
-    result: ParseResult = get_redacted_url(
-        urlparse(get_postgres_url("postgres"))
-    )
+    result: ParseResult = get_redacted_url(urlparse(get_postgres_url("postgres")))
     logger.info(f"URL: {result.geturl()}")
     result = get_redacted_url(urlparse(get_search_url()))
     logger.info(f"{HIGHLIGHT_BEGIN}Search{HIGHLIGHT_END}")
@@ -171,9 +162,7 @@ def compiled_query(
 
 class MutuallyExclusiveOption(click.Option):
     def __init__(self, *args, **kwargs):
-        self.mutually_exclusive: Set = set(
-            kwargs.pop("mutually_exclusive", [])
-        )
+        self.mutually_exclusive: Set = set(kwargs.pop("mutually_exclusive", []))
         help: str = kwargs.get("help", "")
         if self.mutually_exclusive:
             kwargs["help"] = help + (
@@ -189,6 +178,4 @@ class MutuallyExclusiveOption(click.Option):
                 f"arguments `{', '.join(self.mutually_exclusive)}`."
             )
 
-        return super(MutuallyExclusiveOption, self).handle_parse_result(
-            ctx, opts, args
-        )
+        return super(MutuallyExclusiveOption, self).handle_parse_result(ctx, opts, args)
