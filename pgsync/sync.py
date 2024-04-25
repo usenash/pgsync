@@ -403,6 +403,8 @@ class Sync(Base, metaclass=Singleton):
                 and payload.table == self.tree.root.table
                 and payload.data.get("id") not in ids_already_seen
             ]
+            # deduplicate root updates
+            root_updates = list({payload.data.get("id"): payload for payload in root_updates}.values())
             ops_to_add = list(self._payloads(root_updates))
             self._bulk_index_and_remove_duplicates(ops_to_add)
             ids_already_seen.update(extract_ids(ops_to_add))

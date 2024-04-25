@@ -94,8 +94,6 @@ class Node(object):
     parent: Node | None = None
     base_tables: list | None = None
 
-    has_node_setup: bool = False
-
     def __post_init__(self):
         self.model: sa.sql.Alias = self.models(self.table, self.schema)
         self.columns = self.columns or []
@@ -143,8 +141,6 @@ class Node(object):
 
     def setup(self):
         """Setup node columns."""
-        if self.has_node_setup:
-            return
 
         self.columns = []
 
@@ -176,8 +172,6 @@ class Node(object):
                     raise ColumnNotFoundError(f'Column "{column_name}" not present on ' f'table "{self.table}"')
                 self.columns.append(column_name)
                 self.columns.append(self.model.c[column_name])
-
-        self.has_node_setup = True
 
     @property
     def primary_keys(self):
@@ -230,9 +224,6 @@ class Node(object):
 class Tree:
     models: Callable
 
-    post_order_traverse: list[Node] | None = None
-    breadth_first_traverse: list[Node] | None = None
-
     def __post_init__(self):
         self.tables: Set[str] = set()
         self.__nodes: Dict[tuple[str, str], Node] = {}
@@ -241,15 +232,11 @@ class Tree:
     def display(self) -> None:
         self.root.display()
 
-    def traverse_breadth_first(self) -> list[Node]:
-        if not self.breadth_first_traverse:
-            self.breadth_first_traverse = list(self.root.traverse_breadth_first())
-        return self.breadth_first_traverse
+    def traverse_breadth_first(self) -> Generator:
+        return self.root.traverse_breadth_first()
 
-    def traverse_post_order(self) -> list[Node]:
-        if not self.post_order_traverse:
-            self.post_order_traverse = list(self.root.traverse_post_order())
-        return self.post_order_traverse
+    def traverse_post_order(self) -> Generator:
+        return self.root.traverse_post_order()
 
     def build(self, data: dict) -> Node:
         if not isinstance(data, dict):
