@@ -417,19 +417,17 @@ class Sync(Base, metaclass=Singleton):
                 f"Compressed {num_rows} changes to {len(all_payloads)} after indexing {len(root_inserts)} root inserts and {len(root_updates)} updates"
             )
 
-            payloads: List[Payload] = []
+            payloads: list[Payload] = []
             bulk_ops = []
             ids_already_seen = set()
             for i, payload in enumerate(all_payloads):
                 if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
                     # we don't need to update the same record twice
-                    if payloads and i + 1 < len(all_payloads):
-                        payload2 = all_payloads[i + 1]
-                        if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
-                            ops_to_add = list(self._payloads(payloads))
-                            bulk_ops.extend(ops_to_add)
-                            ids_already_seen.update(extract_ids(ops_to_add))
-                            payloads = []
+                    if payloads:
+                        ops_to_add = list(self._payloads(payloads))
+                        bulk_ops.extend(ops_to_add)
+                        ids_already_seen.update(extract_ids(ops_to_add))
+                        payloads = []
 
                     continue
 
