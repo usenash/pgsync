@@ -433,10 +433,10 @@ class Sync(Base, metaclass=Singleton):
 
                 payloads.append(payload)
 
-                if payload.table == "flags":
-                    logger.info(
-                        f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
-                    )
+                # if payload.table == "flags":
+                #     logger.info(
+                #         f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
+                #     )
 
                 if i + 1 < len(all_payloads):
                     payload2 = all_payloads[i + 1]
