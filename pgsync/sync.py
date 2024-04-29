@@ -960,6 +960,10 @@ class Sync(Base, metaclass=Singleton):
             curr_txn = self.txid_current
             num_behind = curr_txn - (txmax or self._checkpoint)
             logger.info(f"Current txn: {curr_txn:,}, Latest sync: {latest_sync:,}, Number txns behind: {num_behind:,}")
+
+            if num_behind > settings.TXN_BEHIND_THRESHOLD:
+                logger.warning(f"Consider restarting the container - number of txns behind threshold: {num_behind:,}")
+
         for i, (keys, row, primary_keys) in enumerate(self.fetchmany(node._subquery)):
             row: dict = Transform.transform(row, self.nodes)
 

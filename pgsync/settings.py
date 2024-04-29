@@ -42,6 +42,7 @@ STREAM_RESULTS = env.bool("STREAM_RESULTS", default=True)
 # db polling interval
 POLL_INTERVAL = env.float("POLL_INTERVAL", default=0.1)
 TXN_IN_FLIGHT_WAITS = [float(val) for val in env.list("TXN_IN_FLIGHT_WAITS", default=[1, 2])]
+TXN_BEHIND_THRESHOLD = env.int("TXN_BEHIND_THRESHOLD", default=50_000)
 
 
 # Elasticsearch/OpenSearch:
