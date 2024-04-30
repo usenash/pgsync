@@ -304,13 +304,7 @@ class Sync(Base, metaclass=Singleton):
             raise PrimaryKeyNotFoundError(f"No primary key found on table: {table}")
         return f"{PRIMARY_KEY_DELIMITER}".join(map(str, primary_keys))
 
-    def logical_slot_changes(
-        self,
-        txmin: Optional[int] = None,
-        txmax: Optional[int] = None,
-        txn_ids: list[int] | None = None,
-        upto_nchanges: Optional[int] = None,
-    ) -> None:
+    def logical_slot_changes(self) -> None:
         """
         Process changes from the db logical replication logs.
 
@@ -337,13 +331,8 @@ class Sync(Base, metaclass=Singleton):
         # minimize the tmp file disk usage when calling
         # PG_LOGICAL_SLOT_PEEK_CHANGES and PG_LOGICAL_SLOT_GET_CHANGES
         # by limiting to a smaller batch size.
-        count: int = self.logical_slot_count_changes(
-            self.__name,
-            txmin=None,
-            txmax=None,
-            txn_ids=txn_ids,
-            upto_nchanges=upto_nchanges,
-        )
+        start_timer = time.time()
+        count: int = self.logical_slot_count_changes(self.__name)
         if count == 0:
             logger.info("No changes to sync")
             return
@@ -351,13 +340,7 @@ class Sync(Base, metaclass=Singleton):
         up_to_n = count
         logger.info("Starting WAL Sync")
         logger.info(f"Total changes to sync via logical slot: {count}")
-        changes: list = self.logical_slot_peek_changes(
-            self.__name,
-            txmin=None,
-            txmax=None,
-            txn_ids=txn_ids,
-            upto_nchanges=up_to_n,
-        )
+        changes: list = self.logical_slot_peek_changes(self.__name, upto_nchanges=up_to_n)
 
         if not changes:
             logger.warning(f"No changes found even though we counted some in the WAL: {count}.")
@@ -381,7 +364,7 @@ class Sync(Base, metaclass=Singleton):
 
         # publish to kafka
         all_payloads = [self.parse_logical_slot(row.data) for row in rows]
-        if settings.KAFKA_ENABLE_PUBLISH:
+        if settings.KAFKA_ENABLE_PUBLISH and self.kafka_producer:
             st = time.time()
             logger.info(f"Syncing {num_rows} changes")
             for p in all_payloads:
@@ -468,13 +451,14 @@ class Sync(Base, metaclass=Singleton):
         # need this to remove records from WAL
         self.logical_slot_get_changes(
             self.__name,
-            txmin=None,
-            txmax=None,
-            txn_ids=txn_ids,
             upto_nchanges=up_to_n,
             limit=1,
         )
-        logger.info(f"Done syncing {count} changes - Finished WAL Sync")
+        end_timer = time.time()
+        total_time = end_timer - start_timer
+        logger.info(
+            f"Done syncing {count} changes - Finished WAL Sync, took {total_time} seconds ({total_time / count * 1000} ms/record)"
+        )
 
     def _bulk_index_and_remove_duplicates(self, bulk_ops: list) -> None:
         to_index = []
@@ -1204,7 +1188,7 @@ class Sync(Base, metaclass=Singleton):
         self.search_client.bulk(self.index, self.sync(txmin=txmin, txmax=txmax))
         # now sync up to txmax to capture everything we may have missed
         # logger.debug(f'completed sync to OpenSearch: {time.time() - start_time}, Starting logical slot changes')
-        self.logical_slot_changes(txmin=txmin, txmax=txmax, upto_nchanges=None)
+        self.logical_slot_changes()
         # logger.debug(f'completed logical slot changes: {time.time() - start_time}')
 
         # see if the slow ones finished yet
@@ -1217,7 +1201,7 @@ class Sync(Base, metaclass=Singleton):
             if finished_txns:
                 self.search_client.bulk(self.index, self.sync(txn_ids=finished_txns))
                 # now sync up to txmax to capture everything we may have missed
-                self.logical_slot_changes(txn_ids=finished_txns, upto_nchanges=None)
+                # self.logical_slot_changes(txn_ids=finished_txns, upto_nchanges=None)
                 self._remove_slow_txns(finished_txns)
         # logger.debug(f'Done - updating checkpoint: {time.time() - start_time}')
         self.checkpoint: int = txmax or self.txid_current
@@ -1274,7 +1258,7 @@ class Sync(Base, metaclass=Singleton):
             if not in_flight_transactions:
                 return None
 
-            logger.info(f"Waiting for transactions: {in_flight_transactions} to complete")
+            logger.info(f"Waiting for {len(in_flight_transactions)} transactions to complete")
             time.sleep(wait)
 
         return in_flight_transactions
