@@ -945,7 +945,7 @@ class Sync(Base, metaclass=Singleton):
         #     logger.info(
         #         f"Syncing {count} rows from transactions: {txmin} to {txmax}"
         #     )
-        if random.random() < 0.1:
+        if not settings.IS_KAFKA_APP and random.random() < 0.1:
             latest_sync = txmax or self._checkpoint
             curr_txn = self.txid_current
             num_behind = curr_txn - (txmax or self._checkpoint)

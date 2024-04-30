@@ -148,6 +148,7 @@ KAFKA_ENABLE_PUBLISH = env.bool("KAFKA_ENABLE_PUBLISH", default=False)
 KAFKA_BROKER_SERVERS = env.str("KAFKA_BROKER_SERVERS", default="localhost:9092")
 KAFKA_MAX_MSG_BEFORE_FLUSH = env.int("KAFKA_MAX_MSG_BEFORE_FLUSH", default=1000)
 KAFKA_MAX_SEC_BEFORE_FLUSH = env.int("KAFKA_MAX_SEC_BEFORE_FLUSH", default=60)
+IS_KAFKA_APP = env.bool("IS_KAFKA_APP", default=False)
 
 
 # Logging:
