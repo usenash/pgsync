@@ -125,62 +125,64 @@ class Sync(Base, metaclass=Singleton):
 
         self.connect()
 
-        max_replication_slots: Optional[str] = self.pg_settings("max_replication_slots")
-        try:
-            if int(max_replication_slots) < 1:
-                raise TypeError
-        except TypeError:
-            raise RuntimeError(
-                "Ensure there is at least one replication slot defined " "by setting max_replication_slots = 1"
-            )
-
-        wal_level: Optional[str] = self.pg_settings("wal_level")
-        if not wal_level or wal_level.lower() != "logical":
-            raise RuntimeError("Enable logical decoding by setting wal_level = logical")
-
-        self._can_create_replication_slot("_tmp_")
-
-        rds_logical_replication: Optional[str] = self.pg_settings("rds.logical_replication")
-        if rds_logical_replication and rds_logical_replication.lower() == "off":
-            raise RDSError("rds.logical_replication is not enabled")
-
         if self.index is None:
             raise ValueError("Index is missing for document")
 
-        # ensure we have run bootstrap and the replication slot exists
-        if repl_slots and not self.replication_slots(self.__name):
-            raise RuntimeError(
-                f'Replication slot "{self.__name}" does not exist.\n' f'Make sure you have run the "bootstrap" command.'
-            )
+        if not settings.IS_KAFKA_APP:
+            max_replication_slots: Optional[str] = self.pg_settings("max_replication_slots")
+            try:
+                if int(max_replication_slots) < 1:
+                    raise TypeError
+            except TypeError:
+                raise RuntimeError(
+                    "Ensure there is at least one replication slot defined " "by setting max_replication_slots = 1"
+                )
 
-        # ensure the checkpoint dirpath is valid
-        if not os.path.exists(settings.CHECKPOINT_PATH):
-            raise RuntimeError(
-                f"Ensure the checkpoint directory exists " f'"{settings.CHECKPOINT_PATH}" and is readable.'
-            )
+            wal_level: Optional[str] = self.pg_settings("wal_level")
+            if not wal_level or wal_level.lower() != "logical":
+                raise RuntimeError("Enable logical decoding by setting wal_level = logical")
 
-        if not os.access(settings.CHECKPOINT_PATH, os.W_OK | os.R_OK):
-            raise RuntimeError(f'Ensure the checkpoint directory "{settings.CHECKPOINT_PATH}"' f" is read/writable")
+            self._can_create_replication_slot("_tmp_")
 
-        self.tree.display()
+            rds_logical_replication: Optional[str] = self.pg_settings("rds.logical_replication")
+            if rds_logical_replication and rds_logical_replication.lower() == "off":
+                raise RDSError("rds.logical_replication is not enabled")
 
-        for node in self.tree.traverse_breadth_first():
-            # ensure internal materialized view compatibility
-            if MATERIALIZED_VIEW in self._materialized_views(node.schema):
-                if MATERIALIZED_VIEW_COLUMNS != self.columns(node.schema, MATERIALIZED_VIEW):
-                    raise RuntimeError(
-                        f"Required materialized view columns not present on "
-                        f"{MATERIALIZED_VIEW}. Please re-run bootstrap."
-                    )
+            # ensure we have run bootstrap and the replication slot exists
+            if repl_slots and not self.replication_slots(self.__name):
+                raise RuntimeError(
+                    f'Replication slot "{self.__name}" does not exist.\n'
+                    f'Make sure you have run the "bootstrap" command.'
+                )
 
-            if node.schema not in self.schemas:
-                raise InvalidSchemaError(f"Unknown schema name(s): {node.schema}")
+            # ensure the checkpoint dirpath is valid
+            if not os.path.exists(settings.CHECKPOINT_PATH):
+                raise RuntimeError(
+                    f"Ensure the checkpoint directory exists " f'"{settings.CHECKPOINT_PATH}" and is readable.'
+                )
 
-            # ensure all base tables have at least one primary_key
-            for table in node.base_tables:
-                model: sa.sql.Alias = self.models(table, node.schema)
-                if not model.primary_keys:
-                    raise PrimaryKeyNotFoundError(f"No primary key(s) for base table: {table}")
+            if not os.access(settings.CHECKPOINT_PATH, os.W_OK | os.R_OK):
+                raise RuntimeError(f'Ensure the checkpoint directory "{settings.CHECKPOINT_PATH}"' f" is read/writable")
+
+            self.tree.display()
+
+            for node in self.tree.traverse_breadth_first():
+                # ensure internal materialized view compatibility
+                if MATERIALIZED_VIEW in self._materialized_views(node.schema):
+                    if MATERIALIZED_VIEW_COLUMNS != self.columns(node.schema, MATERIALIZED_VIEW):
+                        raise RuntimeError(
+                            f"Required materialized view columns not present on "
+                            f"{MATERIALIZED_VIEW}. Please re-run bootstrap."
+                        )
+
+                if node.schema not in self.schemas:
+                    raise InvalidSchemaError(f"Unknown schema name(s): {node.schema}")
+
+                # ensure all base tables have at least one primary_key
+                for table in node.base_tables:
+                    model: sa.sql.Alias = self.models(table, node.schema)
+                    if not model.primary_keys:
+                        raise PrimaryKeyNotFoundError(f"No primary key(s) for base table: {table}")
 
     def analyze(self) -> None:
         for node in self.tree.traverse_breadth_first():
