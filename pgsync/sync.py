@@ -337,145 +337,144 @@ class Sync(Base, metaclass=Singleton):
         # minimize the tmp file disk usage when calling
         # PG_LOGICAL_SLOT_PEEK_CHANGES and PG_LOGICAL_SLOT_GET_CHANGES
         # by limiting to a smaller batch size.
-        offset: int = 0
-        total: int = 0
-        limit: int = settings.LOGICAL_SLOT_CHUNK_SIZE
         count: int = self.logical_slot_count_changes(
             self.__name,
-            txmin=txmin,
-            txmax=txmax,
+            txmin=None,
+            txmax=None,
             txn_ids=txn_ids,
             upto_nchanges=upto_nchanges,
         )
+        if count == 0:
+            logger.info("No changes to sync")
+            return
+
+        up_to_n = count
+        logger.info("Starting WAL Sync")
         logger.info(f"Total changes to sync via logical slot: {count}")
-        while True:
-            changes: int = self.logical_slot_peek_changes(
-                self.__name,
-                txmin=txmin,
-                txmax=txmax,
-                txn_ids=txn_ids,
-                upto_nchanges=upto_nchanges,
-                limit=limit,
-                offset=offset,
-            )
-            if not changes or total > count:
-                break
+        changes: list = self.logical_slot_peek_changes(
+            self.__name,
+            txmin=None,
+            txmax=None,
+            txn_ids=txn_ids,
+            upto_nchanges=up_to_n,
+        )
 
-            rows: list = []
-            for row in changes:
-                if row.data.startswith("BEGIN") or row.data.startswith("COMMIT"):
-                    continue
+        if not changes:
+            logger.warning(f"No changes found even though we counted some in the WAL: {count}.")
+            return
 
-                if row.data.startswith("table public.flags"):
-                    logger.info(f"found flag: {row.data}")
+        rows: list = []
+        for row in changes:
+            if row.data.startswith("BEGIN") or row.data.startswith("COMMIT"):
+                continue
 
-                # ignore the tables we're not syncing
-                if not any(row.data.startswith(table) for table in self.table_list):
-                    continue
-                rows.append(row)
+            if row.data.startswith("table public.flags"):
+                logger.info(f"found flag: {row.data}")
 
-            # publish to kafka
-            all_payloads = [self.parse_logical_slot(row.data) for row in rows]
-            num_rows = len(rows)
-            if settings.KAFKA_ENABLE_PUBLISH:
-                st = time.time()
-                logger.info(f"Syncing {len(rows)} changes")
-                for p in all_payloads:
-                    self.kafka_producer.produce(data=p.to_dict())
+            # ignore the tables we're not syncing
+            if not any(row.data.startswith(table) for table in self.table_list):
+                continue
+            rows.append(row)
 
-                self.kafka_producer.possibly_flush(force=True)
-                logger.info(f"published {len(rows)} changes to kafka, took {time.time() - st} seconds")
+        num_rows = len(rows)
+        logger.info(f"Of {count} transactions, we found {num_rows} changes to sync")
 
-            ids_already_seen = set()
+        # publish to kafka
+        all_payloads = [self.parse_logical_slot(row.data) for row in rows]
+        if settings.KAFKA_ENABLE_PUBLISH:
+            st = time.time()
+            logger.info(f"Syncing {num_rows} changes")
+            for p in all_payloads:
+                self.kafka_producer.produce(data=p.to_dict())
 
-            # index root inserts
-            root_inserts = [
-                payload
-                for payload in all_payloads
-                if payload.tg_op == "INSERT" and payload.table == self.tree.root.table
-            ]
-            if root_inserts:
-                ops_to_add = list(self._payloads(root_inserts))
-                self._bulk_index_and_remove_duplicates(ops_to_add)
-                ids_already_seen.update(extract_ids(ops_to_add))
+            self.kafka_producer.possibly_flush(force=True)
+            logger.info(f"published {num_rows} changes to kafka, took {time.time() - st} seconds")
 
-            # index root updates
-            root_updates = [
-                payload
-                for payload in all_payloads
-                if payload.tg_op == "UPDATE"
-                and payload.table == self.tree.root.table
-                and payload.data.get("id") not in ids_already_seen
-            ]
-            # deduplicate root updates
-            if root_updates:
-                root_updates = list({payload.data.get("id"): payload for payload in root_updates}.values())
-                ops_to_add = list(self._payloads(root_updates))
-                self._bulk_index_and_remove_duplicates(ops_to_add)
-                ids_already_seen.update(extract_ids(ops_to_add))
+        ids_already_seen = set()
 
-            all_payloads = [payload for payload in all_payloads if payload.data.get("id") not in ids_already_seen]
+        # index root inserts
+        root_inserts = [
+            payload for payload in all_payloads if payload.tg_op == "INSERT" and payload.table == self.tree.root.table
+        ]
+        if root_inserts:
+            ops_to_add = list(self._payloads(root_inserts))
+            self._bulk_index_and_remove_duplicates(ops_to_add)
+            ids_already_seen.update(extract_ids(ops_to_add))
 
-            logger.info(
-                f"Compressed {num_rows} changes to {len(all_payloads)} after indexing {len(root_inserts)} root inserts and {len(root_updates)} updates"
-            )
+        # index root updates
+        root_updates = [
+            payload
+            for payload in all_payloads
+            if payload.tg_op == "UPDATE"
+            and payload.table == self.tree.root.table
+            and payload.data.get("id") not in ids_already_seen
+        ]
+        # deduplicate root updates
+        if root_updates:
+            root_updates = list({payload.data.get("id"): payload for payload in root_updates}.values())
+            ops_to_add = list(self._payloads(root_updates))
+            self._bulk_index_and_remove_duplicates(ops_to_add)
+            ids_already_seen.update(extract_ids(ops_to_add))
 
-            payloads: list[Payload] = []
-            bulk_ops = []
-            ids_already_seen = set()
-            for i, payload in enumerate(all_payloads):
-                if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
-                    # we don't need to update the same record twice
-                    if payloads:
-                        ops_to_add = list(self._payloads(payloads))
-                        bulk_ops.extend(ops_to_add)
-                        ids_already_seen.update(extract_ids(ops_to_add))
-                        payloads = []
+        all_payloads = [payload for payload in all_payloads if payload.data.get("id") not in ids_already_seen]
 
-                    continue
+        logger.info(
+            f"Compressed {num_rows} changes to {len(all_payloads)} after indexing {len(root_inserts)} root inserts and {len(root_updates)} updates"
+        )
 
-                payloads.append(payload)
-
-                if payload.table == "flags":
-                    logger.info(
-                        f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
-                    )
-
-                if i + 1 < len(all_payloads):
-                    payload2 = all_payloads[i + 1]
-                    if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
-                        ops_to_add = list(self._payloads(payloads))
-                        bulk_ops.extend(ops_to_add)
-                        ids_already_seen.update(extract_ids(ops_to_add))
-                        payloads = []
-                else:
-                    bulk_ops.extend(list(self._payloads(payloads)))
-                    self._bulk_index_and_remove_duplicates(bulk_ops)
-                    bulk_ops = []
+        payloads: list[Payload] = []
+        bulk_ops = []
+        ids_already_seen = set()
+        for i, payload in enumerate(all_payloads):
+            if payload.tg_op == "UPDATE" and payload.data.get("id") and payload.data["id"] in ids_already_seen:
+                # we don't need to update the same record twice
+                if payloads:
+                    ops_to_add = list(self._payloads(payloads))
+                    bulk_ops.extend(ops_to_add)
+                    ids_already_seen.update(extract_ids(ops_to_add))
                     payloads = []
 
-                if len(bulk_ops) > 1000:
-                    # remove duplicates
-                    self._bulk_index_and_remove_duplicates(bulk_ops)
-                    bulk_ops = []
+                continue
 
-            if bulk_ops:
+            payloads.append(payload)
+
+            if payload.table == "flags":
+                logger.info(
+                    f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
+                )
+
+            if i + 1 < len(all_payloads):
+                payload2 = all_payloads[i + 1]
+                if payload.tg_op != payload2.tg_op or payload.table != payload2.table:
+                    ops_to_add = list(self._payloads(payloads))
+                    bulk_ops.extend(ops_to_add)
+                    ids_already_seen.update(extract_ids(ops_to_add))
+                    payloads = []
+            else:
+                bulk_ops.extend(list(self._payloads(payloads)))
+                self._bulk_index_and_remove_duplicates(bulk_ops)
+                bulk_ops = []
+                payloads = []
+
+            if len(bulk_ops) > 1000:
+                # remove duplicates
                 self._bulk_index_and_remove_duplicates(bulk_ops)
                 bulk_ops = []
 
-            self.logical_slot_get_changes(
-                self.__name,
-                txmin=txmin,
-                txmax=txmax,
-                txn_ids=txn_ids,
-                upto_nchanges=upto_nchanges,
-                limit=limit,
-                offset=offset,
-            )
-            offset += limit
-            total += len(changes)
-            self.count["xlog"] += len(rows)
-            logger.info(f"Done syncing {count} changes")
+        if bulk_ops:
+            self._bulk_index_and_remove_duplicates(bulk_ops)
+            bulk_ops = []
+
+        # need this to remove records from WAL
+        self.logical_slot_get_changes(
+            self.__name,
+            txmin=None,
+            txmax=None,
+            txn_ids=txn_ids,
+            upto_nchanges=up_to_n,
+            limit=1,
+        )
+        logger.info(f"Done syncing {count} changes - Finished WAL Sync")
 
     def _bulk_index_and_remove_duplicates(self, bulk_ops: list) -> None:
         to_index = []
