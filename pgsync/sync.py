@@ -304,75 +304,8 @@ class Sync(Base, metaclass=Singleton):
             raise PrimaryKeyNotFoundError(f"No primary key found on table: {table}")
         return f"{PRIMARY_KEY_DELIMITER}".join(map(str, primary_keys))
 
-    def logical_slot_changes(self) -> None:
-        """
-        Process changes from the db logical replication logs.
-
-        Here, we are grouping all rows of the same table and tg_op
-        and processing them as a group in bulk.
-        This is more efficient.
-        e.g [
-            {'tg_op': INSERT, 'table': A, ...},
-            {'tg_op': INSERT, 'table': A, ...},
-            {'tg_op': INSERT, 'table': A, ...},
-            {'tg_op': DELETE, 'table': A, ...},
-            {'tg_op': DELETE, 'table': A, ...},
-            {'tg_op': INSERT, 'table': A, ...},
-            {'tg_op': INSERT, 'table': A, ...},
-        ]
-
-        We will have 3 groups being synced together in one execution
-        First 3 INSERT, Next 2 DELETE and then the next 2 INSERT.
-        Perhaps this could be improved but this is the best approach so far.
-
-        TODO: We can also process all INSERTS together and rearrange
-        them as done below
-        """
-        # minimize the tmp file disk usage when calling
-        # PG_LOGICAL_SLOT_PEEK_CHANGES and PG_LOGICAL_SLOT_GET_CHANGES
-        # by limiting to a smaller batch size.
-        start_timer = time.time()
-        count: int = self.logical_slot_count_changes(self.__name)
-        if count == 0:
-            # logger.info("No changes to sync")
-            return
-
-        up_to_n = count
-        logger.info("Starting WAL Sync")
-        logger.info(f"Total changes to sync via logical slot: {count}")
-        changes: list = self.logical_slot_peek_changes(self.__name, upto_nchanges=up_to_n)
-
-        if not changes:
-            logger.warning(f"No changes found even though we counted some in the WAL: {count}.")
-            return
-
-        rows: list = []
-        for row in changes:
-            if row.data.startswith("BEGIN") or row.data.startswith("COMMIT"):
-                continue
-
-            if row.data.startswith("table public.flags"):
-                logger.info(f"found flag: {row.data}")
-
-            # ignore the tables we're not syncing
-            if not any(row.data.startswith(table) for table in self.table_list):
-                continue
-            rows.append(row)
-
-        num_rows = len(rows)
-        logger.info(f"Of {count} transactions, we found {num_rows} changes to sync")
-
-        # publish to kafka
-        all_payloads = [self.parse_logical_slot(row.data) for row in rows]
-        if settings.KAFKA_ENABLE_PUBLISH and self.kafka_producer:
-            st = time.time()
-            logger.info(f"Syncing {num_rows} changes")
-            for p in all_payloads:
-                self.kafka_producer.produce(data=p.to_dict())
-
-            self.kafka_producer.possibly_flush(force=True)
-            logger.info(f"published {num_rows} changes to kafka, took {time.time() - st} seconds")
-
+    def process_all_payloads_from_wal(self, all_payloads: list[Payload], num_rows: int) -> None:
+        """Process all payloads from the WAL."""
         ids_already_seen = set()
 
         # index root inserts
@@ -421,10 +354,10 @@ class Sync(Base, metaclass=Singleton):
 
             payloads.append(payload)
 
-            if payload.table == "flags":
-                logger.info(
-                    f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
-                )
+            # if payload.table == "flags":
+            #     logger.info(
+            #         f"{i} of {len(all_payloads)}, Payload: {payload.data['id']}, {payload.tg_op}, {list(self._payloads(payloads))}"
+            #     )
 
             if i + 1 < len(all_payloads):
                 payload2 = all_payloads[i + 1]
@@ -448,6 +381,77 @@ class Sync(Base, metaclass=Singleton):
             self._bulk_index_and_remove_duplicates(bulk_ops)
             bulk_ops = []
 
+    def logical_slot_changes(self) -> None:
+        """
+        Process changes from the db logical replication logs.
+
+        Here, we are grouping all rows of the same table and tg_op
+        and processing them as a group in bulk.
+        This is more efficient.
+        e.g [
+            {'tg_op': INSERT, 'table': A, ...},
+            {'tg_op': INSERT, 'table': A, ...},
+            {'tg_op': INSERT, 'table': A, ...},
+            {'tg_op': DELETE, 'table': A, ...},
+            {'tg_op': DELETE, 'table': A, ...},
+            {'tg_op': INSERT, 'table': A, ...},
+            {'tg_op': INSERT, 'table': A, ...},
+        ]
+
+        We will have 3 groups being synced together in one execution
+        First 3 INSERT, Next 2 DELETE and then the next 2 INSERT.
+        Perhaps this could be improved but this is the best approach so far.
+
+        TODO: We can also process all INSERTS together and rearrange
+        them as done below
+        """
+        # minimize the tmp file disk usage when calling
+        # PG_LOGICAL_SLOT_PEEK_CHANGES and PG_LOGICAL_SLOT_GET_CHANGES
+        # by limiting to a smaller batch size.
+        start_timer = time.time()
+        count: int = self.logical_slot_count_changes(self.__name)
+        if count == 0:
+            # logger.info("No changes to sync")
+            return
+
+        up_to_n = count
+        logger.info("Starting WAL Sync")
+        logger.info(f"Total changes to sync via logical slot: {count}")
+        changes: list = self.logical_slot_peek_changes(self.__name, upto_nchanges=up_to_n)
+
+        if not changes:
+            logger.warning(f"No changes found even though we counted some in the WAL: {count}.")
+            return
+
+        rows: list = []
+        for row in changes:
+            if row.data.startswith("BEGIN") or row.data.startswith("COMMIT"):
+                continue
+
+            # if row.data.startswith("table public.flags"):
+            #     logger.info(f"found flag: {row.data}")
+
+            # ignore the tables we're not syncing
+            if not any(row.data.startswith(table) for table in self.table_list):
+                continue
+            rows.append(row)
+
+        num_rows = len(rows)
+        logger.info(f"Of {count} transactions, we found {num_rows} changes to sync")
+
+        # publish to kafka
+        all_payloads = [self.parse_logical_slot(row.data) for row in rows]
+        if settings.KAFKA_ENABLE_PUBLISH and self.kafka_producer:
+            st = time.time()
+            logger.info(f"Syncing {num_rows} changes")
+            for p in all_payloads:
+                self.kafka_producer.produce(data=p.to_dict())
+
+            self.kafka_producer.possibly_flush(force=True)
+            logger.info(f"published {num_rows} changes to kafka, took {time.time() - st} seconds")
+
+        if settings.PROCESS_WAL_PAYLOADS:
+            self.process_all_payloads_from_wal(all_payloads, num_rows)
         # need this to remove records from WAL
         self.logical_slot_get_changes(
             self.__name,
