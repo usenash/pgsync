@@ -334,7 +334,7 @@ class Sync(Base, metaclass=Singleton):
         start_timer = time.time()
         count: int = self.logical_slot_count_changes(self.__name)
         if count == 0:
-            logger.info("No changes to sync")
+            # logger.info("No changes to sync")
             return
 
         up_to_n = count
@@ -455,9 +455,9 @@ class Sync(Base, metaclass=Singleton):
             limit=1,
         )
         end_timer = time.time()
-        total_time = end_timer - start_timer
+        total_time = round(end_timer - start_timer, 4)
         logger.info(
-            f"Done syncing {count} changes - Finished WAL Sync, took {total_time} seconds ({total_time / count * 1000} ms/record)"
+            f"Done syncing {count} changes - Finished WAL Sync, took {total_time} seconds ({round(total_time / count * 1000, 1)} ms/record)"
         )
 
     def _bulk_index_and_remove_duplicates(self, bulk_ops: list) -> None:
