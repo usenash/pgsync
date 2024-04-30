@@ -366,6 +366,9 @@ class Sync(Base, metaclass=Singleton):
                 if row.data.startswith("BEGIN") or row.data.startswith("COMMIT"):
                     continue
 
+                if row.data.startswith("table public.flags"):
+                    logger.info(f"found flag: {row.data}")
+
                 # ignore the tables we're not syncing
                 if not any(row.data.startswith(table) for table in self.table_list):
                     continue
