@@ -1,5 +1,5 @@
 # base libraries
-black
+# black
 boto3
 click
 elasticsearch
@@ -18,8 +18,8 @@ confluent-kafka
 sqlalchemy==1.4.*
 sqlparse
 # pin these libs because latest flake8 does not allow newer versions of importlib-metadata https://github.com/PyCQA/flake8/issues/1522
-importlib-metadata==4.2.0
-virtualenv==20.16.2
-isort==5.11.*
-zipp==3.13.*
-python-dotenv==0.21.*
+importlib-metadata
+virtualenv
+isort
+zipp
+python-dotenv
