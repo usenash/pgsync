@@ -10,6 +10,7 @@ import re
 import select
 import sys
 import time
+import uuid
 from collections import defaultdict
 from typing import Any, AnyStr, Generator, List, Optional, Set
 
@@ -419,7 +420,10 @@ class Sync(Base, metaclass=Singleton):
         up_to_n = count
         logger.info("Starting WAL Sync")
         logger.info(f"Total changes to sync via logical slot: {count}")
-        changes: list = self.logical_slot_peek_changes(self.__name, upto_nchanges=up_to_n)
+        # changes: list = self.logical_slot_peek_changes(self.__name, upto_nchanges=up_to_n)
+
+        # consume changes from the logical replication slot
+        changes = self.logical_slot_get_changes(self.__name, upto_nchanges=up_to_n)
 
         if not changes:
             logger.warning(f"No changes found even though we counted some in the WAL: {count}.")
@@ -454,12 +458,7 @@ class Sync(Base, metaclass=Singleton):
 
         if settings.PROCESS_WAL_PAYLOADS:
             self.process_all_payloads_from_wal(all_payloads, num_rows)
-        # need this to remove records from WAL
-        self.logical_slot_get_changes(
-            self.__name,
-            upto_nchanges=up_to_n,
-            limit=1,
-        )
+
         end_timer = time.time()
         total_time = round(end_timer - start_timer, 4)
         logger.info(
@@ -1179,7 +1178,9 @@ class Sync(Base, metaclass=Singleton):
 
     def pull(self) -> None:
         """Pull data from db."""
-        # start_time = time.time()
+        start_time = time.time()
+        request_id = uuid.uuid4()
+        logger.info("-> Starting pull loop", extra={"RequestID": request_id})
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
@@ -1209,9 +1210,12 @@ class Sync(Base, metaclass=Singleton):
                 # now sync up to txmax to capture everything we may have missed
                 # self.logical_slot_changes(txn_ids=finished_txns, upto_nchanges=None)
                 self._remove_slow_txns(finished_txns)
-        # logger.debug(f'Done - updating checkpoint: {time.time() - start_time}')
         self.checkpoint: int = txmax or self.txid_current
-        self._truncate = True
+
+        logger.info(
+            f"-> Finished pull loop - {round(time.time() - start_time, 2)} seconds",
+            extra={"RequestID": request_id, "total_time": round(time.time() - start_time, 2)},
+        )
 
     def _remove_slow_txns(self, slow_txns_to_remove: list[int]) -> list[int]:
         return self._set_slow_txns(list(set(self._get_slow_txns()) - set(slow_txns_to_remove)))

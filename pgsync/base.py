@@ -2,7 +2,6 @@
 
 import logging
 import os
-from typing import List, Optional, Set, Tuple
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql  # noqa
@@ -63,13 +62,13 @@ class Payload(object):
         xmin: int | None = None,
         indices: list[str] | None = None,
     ):
-        self.tg_op: str = tg_op
-        self.table: str = table
-        self.schema: str = schema
-        self.old: dict = old or {}
-        self.new: dict = new or {}
-        self.xmin: str = xmin
-        self.indices: list[str] = indices
+        self.tg_op = tg_op
+        self.table = table
+        self.schema = schema
+        self.old = old or {}
+        self.new = new or {}
+        self.xmin = xmin
+        self.indices = indices
 
     @property
     def data(self) -> dict:
@@ -141,7 +140,7 @@ class Base(object):
     def __init__(self, database: str, verbose: bool = False, *args, **kwargs) -> None:
         """Initialize the base class constructor."""
         self.__engine: sa.engine.Engine = _pg_engine(database, echo=False, **kwargs)
-        self.__schemas: Optional[dict] = None
+        self.__schemas: dict | None = None
         # models is a dict of f'{schema}.{table}'
         self.__models: dict = {}
         self.__metadata: dict = {}
@@ -162,7 +161,7 @@ class Base(object):
             logger.exception(f"Cannot connect to database: {e}")
             raise
 
-    def pg_settings(self, column: str) -> Optional[str]:
+    def pg_settings(self, column: str) -> str | None:
         try:
             return self.fetchone(
                 sa.select([sa.column("setting")])
@@ -311,7 +310,7 @@ class Base(object):
         logger.debug(f"Truncating table: {schema}.{table}")
         self.execute(sa.DDL(f'TRUNCATE TABLE "{schema}"."{table}" CASCADE'))
 
-    def truncate_tables(self, tables: List[str], schema: str = DEFAULT_SCHEMA) -> None:
+    def truncate_tables(self, tables: list[str], schema: str = DEFAULT_SCHEMA) -> None:
         """Truncate all tables."""
         logger.debug(f"Truncating tables: {tables}")
         for table in tables:
@@ -333,7 +332,7 @@ class Base(object):
         slot_name: str,
         plugin: str = PLUGIN,
         slot_type: str = "logical",
-    ) -> List[str]:
+    ):
         """List replication slots.
 
         SELECT * FROM PG_REPLICATION_SLOTS
@@ -353,7 +352,7 @@ class Base(object):
             label="replication_slots",
         )
 
-    def create_replication_slot(self, slot_name: str) -> None:
+    def create_replication_slot(self, slot_name: str):
         """Create a replication slot.
 
         Todo:
@@ -373,7 +372,7 @@ class Base(object):
             label="create_replication_slot",
         )
 
-    def drop_replication_slot(self, slot_name: str) -> None:
+    def drop_replication_slot(self, slot_name: str):
         """Drop a replication slot."""
         logger.debug(f"Dropping replication slot: {slot_name}")
         if self.replication_slots(slot_name):
@@ -392,13 +391,13 @@ class Base(object):
         self,
         slot_name: str,
         func: sa.sql.functions._FunctionGenerator,
-        txmin: Optional[int] = None,
-        txmax: Optional[int] = None,
+        txmin: int | None = None,
+        txmax: int | None = None,
         txn_ids: list[int] | None = None,
-        upto_lsn: Optional[int] = None,
-        upto_nchanges: Optional[int] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        upto_lsn: int | None = None,
+        upto_nchanges: int | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> sa.sql.Select:
         filters: list = []
         statement: sa.sql.Select = sa.select([sa.column("xid"), sa.column("data")]).select_from(
@@ -442,14 +441,14 @@ class Base(object):
     def logical_slot_get_changes(
         self,
         slot_name: str,
-        txmin: Optional[int] = None,
-        txmax: Optional[int] = None,
+        txmin: int | None = None,
+        txmax: int | None = None,
         txn_ids: list[int] | None = None,
-        upto_lsn: Optional[int] = None,
-        upto_nchanges: Optional[int] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-    ) -> None:
+        upto_lsn: int | None = None,
+        upto_nchanges: int | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[sa.engine.row.Row]:
         """Get/Consume changes from a logical replication slot.
 
         To get one change and data in existing replication slot:
@@ -469,19 +468,20 @@ class Base(object):
             limit=limit,
             offset=offset,
         )
-        self.execute(statement, options=dict(stream_results=STREAM_RESULTS))
+        # self.execute(statement, options=dict(stream_results=STREAM_RESULTS))
+        return self.fetchall(statement)
 
     def logical_slot_peek_changes(
         self,
         slot_name: str,
-        txmin: Optional[int] = None,
-        txmax: Optional[int] = None,
+        txmin: int | None = None,
+        txmax: int | None = None,
         txn_ids: list[int] | None = None,
-        upto_lsn: Optional[int] = None,
-        upto_nchanges: Optional[int] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-    ) -> List[sa.engine.row.Row]:
+        upto_lsn: int | None = None,
+        upto_nchanges: int | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[sa.engine.row.Row]:
         """Peek a logical replication slot without consuming changes.
 
         SELECT * FROM PG_LOGICAL_SLOT_PEEK_CHANGES('testdb', NULL, 1)
@@ -502,11 +502,11 @@ class Base(object):
     def logical_slot_count_changes(
         self,
         slot_name: str,
-        txmin: Optional[int] = None,
-        txmax: Optional[int] = None,
+        txmin: int | None = None,
+        txmax: int | None = None,
         txn_ids: list[int] | None = None,
-        upto_lsn: Optional[int] = None,
-        upto_nchanges: Optional[int] = None,
+        upto_lsn: int | None = None,
+        upto_nchanges: int | None = None,
     ) -> int:
         statement: sa.sql.Select = self._logical_slot_changes(
             slot_name,
@@ -525,7 +525,7 @@ class Base(object):
         self,
         index: str,
         schema: str,
-        tables: Set,
+        tables: set,
         user_defined_fkey_tables: dict,
     ) -> None:
         create_view(
@@ -555,11 +555,11 @@ class Base(object):
     def create_triggers(
         self,
         schema: str,
-        tables: Optional[List[str]] = None,
+        tables: list[str] | None = None,
         join_queries: bool = False,
     ) -> None:
         """Create a database triggers."""
-        queries: List[str] = []
+        queries: list[str] = []
         for table in self.tables(schema):
             if (tables and table not in tables) or (table in self.views(schema)):
                 continue
@@ -585,11 +585,11 @@ class Base(object):
     def drop_triggers(
         self,
         schema: str,
-        tables: Optional[List[str]] = None,
+        tables: list[str] | None = None,
         join_queries: bool = False,
     ) -> None:
         """Drop all pgsync defined triggers in database."""
-        queries: List[str] = []
+        queries: list[str] = []
         for table in self.tables(schema):
             if tables and table not in tables:
                 continue
@@ -649,10 +649,15 @@ class Base(object):
 
         NB: All integers are long in python3 and call to convert is just int
         """
+        type_ = type_.lower()
+
         if value.lower() == "null":
             return None
 
-        if type_.lower() in (
+        if type_ in ("json", "jsonb", "timestamp without time zone", "timestamp with time zone"):
+            return value
+
+        elif type_ in (
             "bigint",
             "bigserial",
             "int",
@@ -668,10 +673,10 @@ class Base(object):
             "smallserial",
         ):
             try:
-                value = int(value)
+                return int(value)
             except ValueError:
                 raise
-        if type_.lower() in (
+        elif type_ in (
             "char",
             "character",
             "character varying",
@@ -679,36 +684,31 @@ class Base(object):
             "uuid",
             "varchar",
         ):
-            value = value.lstrip("'").rstrip("'")
-        if type_.lower() == "boolean":
-            value = bool(value)
-        if type_.lower() in (
+            return value.lstrip("'").rstrip("'")
+        elif type_ == "boolean":
+            return bool(value)
+        elif type_ in (
             "double precision",
             "float4",
             "float8",
             "real",
         ):
             try:
-                value = float(value)
+                return float(value)
             except ValueError:
                 raise
         return value
 
     def parse_logical_slot(self, row: str) -> Payload:
-        def _parse_logical_slot(data: str) -> Tuple[str, str]:
+        def _parse_logical_slot(data: str):
             while True:
                 match = LOGICAL_SLOT_SUFFIX.search(data)
                 if not match:
                     break
 
-                key: str = match.groupdict().get("key")
-                if key:
-                    key = key.replace('"', "")
-                value: str = match.groupdict().get("value")
-                type_: str = match.groupdict().get("type")
-
-                value = self.parse_value(type_, value)
-
+                d = match.groupdict()
+                key = d["key"].replace('"', "") if d.get("key") else None
+                value = self.parse_value(d["type"], d["value"])
                 # set data for next iteration of the loop
                 data = f"{data[match.span()[1]:]} "
                 yield key, value
@@ -717,8 +717,7 @@ class Base(object):
         if not match:
             raise LogicalSlotParseError(f"No match for row: {row}")
 
-        data = {"old": None, "new": None}
-        data.update(**match.groupdict())
+        data = {"old": None, "new": None, **match.groupdict()}
         payload: Payload = Payload(**data)
 
         span = match.span()
@@ -757,8 +756,8 @@ class Base(object):
     def execute(
         self,
         statement: sa.sql.Select,
-        values: Optional[list] = None,
-        options: Optional[dict] = None,
+        values: list | None = None,
+        options: dict | None = None,
     ) -> None:
         """Execute a query statement."""
         pg_execute(self.engine, statement, values=values, options=options)
@@ -766,7 +765,7 @@ class Base(object):
     def fetchone(
         self,
         statement: sa.sql.Select,
-        label: Optional[str] = None,
+        label: str | None = None,
         literal_binds: bool = False,
     ) -> sa.engine.Row:
         """Fetch one row query."""
@@ -785,9 +784,9 @@ class Base(object):
     def fetchall(
         self,
         statement: sa.sql.Select,
-        label: Optional[str] = None,
+        label: str | None = None,
         literal_binds: bool = False,
-    ) -> List[sa.engine.Row]:
+    ) -> list[sa.engine.Row]:
         """Fetch all rows from a query statement."""
         if self.verbose:
             compiled_query(statement, label=label, literal_binds=literal_binds)
@@ -804,8 +803,8 @@ class Base(object):
     def fetchmany(
         self,
         statement: sa.sql.Select,
-        chunk_size: Optional[int] = None,
-        stream_results: Optional[bool] = None,
+        chunk_size: int | None = None,
+        stream_results: bool | None = None,
     ):
         chunk_size = chunk_size or QUERY_CHUNK_SIZE
         stream_results = stream_results or STREAM_RESULTS
@@ -847,13 +846,13 @@ def subtransactions(session):
 
 def pg_engine(
     database: str,
-    user: Optional[str] = None,
-    host: Optional[str] = None,
-    password: Optional[str] = None,
-    port: Optional[int] = None,
+    user: str | None = None,
+    host: str | None = None,
+    password: str | None = None,
+    port: int | None = None,
     echo: bool = False,
-    sslmode: Optional[str] = None,
-    sslrootcert: Optional[str] = None,
+    sslmode: str | None = None,
+    sslrootcert: str | None = None,
 ):
     """Context manager for managing engines."""
 
@@ -861,13 +860,13 @@ def pg_engine(
         def __init__(
             self,
             database: str,
-            user: Optional[str] = None,
-            host: Optional[str] = None,
-            password: Optional[str] = None,
-            port: Optional[int] = None,
+            user: str | None = None,
+            host: str | None = None,
+            password: str | None = None,
+            port: int | None = None,
             echo: bool = False,
-            sslmode: Optional[str] = None,
-            sslrootcert: Optional[str] = None,
+            sslmode: str | None = None,
+            sslrootcert: str | None = None,
         ):
             self.database = database
             self.user = user
@@ -909,13 +908,13 @@ def pg_engine(
 
 def _pg_engine(
     database: str,
-    user: Optional[str] = None,
-    host: Optional[str] = None,
-    password: Optional[str] = None,
-    port: Optional[int] = None,
+    user: str | None = None,
+    host: str | None = None,
+    password: str | None = None,
+    port: int | None = None,
     echo: bool = False,
-    sslmode: Optional[str] = None,
-    sslrootcert: Optional[str] = None,
+    sslmode: str | None = None,
+    sslrootcert: str | None = None,
 ) -> sa.engine.Engine:
     connect_args: dict = {}
     sslmode = sslmode or PG_SSLMODE
@@ -955,8 +954,8 @@ def _pg_engine(
 def pg_execute(
     engine: sa.engine.Engine,
     statement: sa.sql.Select,
-    values: Optional[list] = None,
-    options: Optional[dict] = None,
+    values: list | None = None,
+    options: dict | None = None,
 ) -> None:
     options = options or {"isolation_level": "AUTOCOMMIT"}
     conn = engine.connect()
