@@ -10,7 +10,6 @@ import re
 import select
 import sys
 import time
-import uuid
 from collections import defaultdict
 from typing import Any, AnyStr, Generator, List, Optional, Set
 
@@ -1179,8 +1178,6 @@ class Sync(Base, metaclass=Singleton):
     def pull(self) -> None:
         """Pull data from db."""
         start_time = time.time()
-        request_id = uuid.uuid4()
-        logger.info("-> Starting pull loop", extra={"RequestID": request_id})
         txmin: int = self.checkpoint
         txmax: int = self.txid_current
 
@@ -1212,10 +1209,7 @@ class Sync(Base, metaclass=Singleton):
                 self._remove_slow_txns(finished_txns)
         self.checkpoint: int = txmax or self.txid_current
 
-        logger.info(
-            f"-> Finished pull loop - {round(time.time() - start_time, 2)} seconds",
-            extra={"RequestID": request_id, "total_time": round(time.time() - start_time, 2)},
-        )
+        logger.info(f"-> Finished pull loop - {round(time.time() - start_time, 4)} seconds")
 
     def _remove_slow_txns(self, slow_txns_to_remove: list[int]) -> list[int]:
         return self._set_slow_txns(list(set(self._get_slow_txns()) - set(slow_txns_to_remove)))
