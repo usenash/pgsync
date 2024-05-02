@@ -3,7 +3,6 @@
 import logging
 import sys
 import time
-from uuid import uuid4
 
 import orjson
 from confluent_kafka import Producer
@@ -63,7 +62,7 @@ class KafkaProducer:
         try:
             self.producer.produce(
                 self.topic,
-                key=uuid4().hex,
+                # key=uuid4().hex,
                 value=orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY),
                 on_delivery=self._default_delivery_callback,
                 **kwargs,
