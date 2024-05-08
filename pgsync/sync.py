@@ -97,10 +97,12 @@ class Sync(Base, metaclass=Singleton):
 
         self.kafka_producer = KafkaProducer(topic=self.index) if settings.KAFKA_ENABLE_PUBLISH else None
 
-        self.redis_client = Redis.from_url(
-            get_redis_url(),
-            socket_timeout=REDIS_SOCKET_TIMEOUT,
-        )
+        if not settings.IS_KAFKA_APP:
+            # don't connect to redis if we're running the kafka app
+            self.redis_client = Redis.from_url(
+                get_redis_url(),
+                socket_timeout=REDIS_SOCKET_TIMEOUT,
+            )
         self.tree: Tree = Tree(self.models)
         self.tree.build(self.nodes)
         if validate:

@@ -50,6 +50,7 @@ class SearchClient(object):
                 pass
             self.streaming_bulk: Callable = elasticsearch.helpers.streaming_bulk
             self.parallel_bulk: Callable = elasticsearch.helpers.parallel_bulk
+            self.helpers = elasticsearch.helpers
             self.Search: Callable = elasticsearch_dsl.Search
             self.Bool: Callable = elasticsearch_dsl.query.Bool
             self.Q: Callable = elasticsearch_dsl.Q
@@ -64,6 +65,7 @@ class SearchClient(object):
             )
             self.streaming_bulk: Callable = opensearchpy.helpers.streaming_bulk
             self.parallel_bulk: Callable = opensearchpy.helpers.parallel_bulk
+            self.helpers = opensearchpy.helpers
             self.Search: Callable = opensearch_dsl.Search
             self.Bool: Callable = opensearch_dsl.query.Bool
             self.Q: Callable = opensearch_dsl.Q
@@ -175,19 +177,29 @@ class SearchClient(object):
         else:
             # parallel bulk consumes more memory and is also more likely
             # to result in 429 errors.
-            for _ in self.parallel_bulk(
+            response = self.helpers.bulk(
                 self.__client,
                 actions,
-                thread_count=thread_count,
-                chunk_size=chunk_size,
-                max_chunk_bytes=max_chunk_bytes,
-                queue_size=queue_size,
-                refresh=refresh,
                 raise_on_exception=raise_on_exception,
                 raise_on_error=raise_on_error,
-                ignore_status=ignore_status,
-            ):
-                self.doc_count += 1
+                max_retries=max_retries,
+            )
+            if isinstance(response, tuple) and len(response) == 2:
+                self.doc_count += response[0]
+
+            # for _ in self.parallel_bulk(
+            #     self.__client,
+            #     actions,
+            #     thread_count=thread_count,
+            #     chunk_size=chunk_size,
+            #     max_chunk_bytes=max_chunk_bytes,
+            #     queue_size=queue_size,
+            #     refresh=refresh,
+            #     raise_on_exception=raise_on_exception,
+            #     raise_on_error=raise_on_error,
+            #     ignore_status=ignore_status,
+            # ):
+            #     self.doc_count += 1
 
     def refresh(self, indices: List[str]) -> None:
         """Refresh the Elasticsearch/OpenSearch index."""
