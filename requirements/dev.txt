@@ -4,9 +4,9 @@
 #
 #    pip-compile --output-file=requirements/dev.txt requirements/dev.in
 #
-boto3==1.34.95
+boto3==1.34.115
     # via -r requirements/base.in
-botocore==1.34.95
+botocore==1.34.115
     # via
     #   boto3
     #   s3transfer
@@ -25,17 +25,17 @@ click==8.1.7
     # via
     #   -r requirements/base.in
     #   pip-tools
-confluent-kafka==2.3.0
+confluent-kafka==2.4.0
     # via -r requirements/base.in
-coverage[toml]==7.5.0
+coverage[toml]==7.5.3
     # via
     #   -r requirements/dev.in
     #   pytest-cov
 distlib==0.3.8
     # via virtualenv
-elastic-transport==8.13.0
+elastic-transport==8.13.1
     # via elasticsearch
-elasticsearch==8.13.0
+elasticsearch==8.13.2
     # via
     #   -r requirements/base.in
     #   elasticsearch-dsl
@@ -43,7 +43,9 @@ elasticsearch-dsl==8.13.1
     # via -r requirements/base.in
 environs==11.0.0
     # via -r requirements/base.in
-faker==25.0.0
+events==0.5
+    # via opensearch-py
+faker==25.3.0
     # via -r requirements/base.in
 filelock==3.14.0
     # via virtualenv
@@ -64,7 +66,7 @@ flake8-print==5.0.0
     # via -r requirements/test.in
 flake8-todo==0.7
     # via -r requirements/test.in
-freezegun==1.5.0
+freezegun==1.5.1
     # via -r requirements/test.in
 identify==2.5.36
     # via pre-commit
@@ -82,19 +84,19 @@ jmespath==1.0.1
     # via
     #   boto3
     #   botocore
-marshmallow==3.21.1
+marshmallow==3.21.2
     # via environs
 mccabe==0.7.0
     # via flake8
 mock==5.1.0
     # via -r requirements/test.in
-nodeenv==1.8.0
+nodeenv==1.9.0
     # via pre-commit
 opensearch-dsl==2.1.0
     # via -r requirements/base.in
-opensearch-py==2.5.0
+opensearch-py==2.6.0
     # via opensearch-dsl
-orjson==3.10.1
+orjson==3.10.3
     # via -r requirements/base.in
 packaging==24.0
     # via
@@ -104,11 +106,11 @@ packaging==24.0
     #   pytest-sugar
 pip-tools==7.4.1
     # via -r requirements/dev.in
-platformdirs==4.2.1
+platformdirs==4.2.2
     # via virtualenv
 pluggy==1.5.0
     # via pytest
-pre-commit==3.7.0
+pre-commit==3.7.1
     # via -r requirements/dev.in
 psycopg2-binary==2.9.9
     # via -r requirements/base.in
@@ -126,7 +128,7 @@ pyproject-hooks==1.1.0
     # via
     #   build
     #   pip-tools
-pytest==8.2.0
+pytest==8.2.1
     # via
     #   -r requirements/test.in
     #   pytest-cov
@@ -156,13 +158,13 @@ pyyaml==6.0.1
     # via pre-commit
 redis==5.0.4
     # via -r requirements/base.in
-requests==2.31.0
+requests==2.32.3
     # via
     #   opensearch-py
     #   requests-aws4auth
 requests-aws4auth==1.2.3
     # via -r requirements/base.in
-ruff==0.4.2
+ruff==0.4.6
     # via -r requirements/dev.in
 s3transfer==0.10.1
     # via boto3
@@ -180,19 +182,19 @@ sqlparse==0.5.0
     # via -r requirements/base.in
 termcolor==2.4.0
     # via pytest-sugar
-urllib3==1.26.18
+urllib3==2.2.1
     # via
     #   botocore
     #   elastic-transport
     #   opensearch-py
     #   requests
-virtualenv==20.26.1
+virtualenv==20.26.2
     # via
     #   -r requirements/base.in
     #   pre-commit
 wheel==0.43.0
     # via pip-tools
-zipp==3.18.1
+zipp==3.19.0
     # via
     #   -r requirements/base.in
     #   importlib-metadata
